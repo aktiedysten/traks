@@ -1,0 +1,23 @@
+{
+  "name": "traks",
+  "version": "1.0.0",
+  "description": "react translations without wanting to kill yourself. much.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "translations"
+  ],
+  "author": "Anders Kaare Straadt",
+  "license": "CC0-1.0",
+  "devDependencies": {
+    "babel-core": "^6.26.3",
+    "babel-plugin-syntax-class-properties": "^6.13.0",
+    "babel-plugin-syntax-jsx": "^6.18.0",
+    "babel-plugin-syntax-object-rest-spread": "^6.13.0",
+    "babel-preset-react-app": "^3.1.1",
+    "readline-sync": "^1.4.9",
+    "string-similarity": "^1.2.0"
+  }
+}
