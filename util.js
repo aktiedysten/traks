@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const fs = require('fs');
 
 /* FIXME probably want to be able to override this at some point, but config
  * file stuff sucks to implement... maybe I'd like to put it in package.json,
@@ -228,4 +229,502 @@ const replace = (babel, path, keep_children) => {
 	path.replaceWith(element);
 };
 
-module.exports = { TraksError, is_translation_tag_node, process_path, replace, options }
+const bake = (babel, path, translations, lang) => {
+	if (path.node.was_traksed) return; // prevent infinite recursion...
+	const t = babel.types;
+	const { key, deps } = process_path(path);
+
+	var node = translations.lookup(key, lang);
+	var children;
+	var attributes;
+	if (node.type === "ArrowFunctionExpression") {
+		children = [];
+		attributes = [
+			t.jSXAttribute(t.jSXIdentifier("k"), t.stringLiteral(key)),
+			t.jSXAttribute(t.jSXIdentifier("deps"), t.jSXExpressionContainer(t.arrayExpression(
+				deps.map(dep => t.identifier(dep))
+			))),
+		];
+	} else {
+		children = node.children;
+		attributes = [];
+	}
+
+	const JT = t.jSXIdentifier(options.translation_tag);
+	const is_self_closing = false;
+
+	var element = t.jSXElement(
+		t.jSXOpeningElement(JT, attributes, is_self_closing),
+		t.JSXClosingElement(JT),
+		children,
+		is_self_closing
+	);
+	element.was_traksed = true;
+	path.replaceWith(element);
+};
+
+const bake_translations_export = (babel, path, lang) => {
+	if (path.node.was_traksed) return; // prevent infinite recursion...
+	const t = babel.types;
+	const decl = path.node.declaration;
+
+	const assert_type = (node, type) => {
+		if (node.type !== type) {
+			const at = ":" + node.loc.start.line;
+			const reason = "expected " + type + "; got " + node.type;
+			throw path.buildCodeFrameError("corrupt translations file at " + at + ": " + reason);
+		}
+	};
+
+	var new_properties = [];
+	assert_type(decl, "ObjectExpression");
+	for (const p of decl.properties) {
+		assert_type(p, "ObjectProperty");
+		assert_type(p.key, "StringLiteral");
+		assert_type(p.value, "ObjectExpression");
+		const key = p.key.value;
+		for (const e of p.value.properties) {
+			assert_type(e, "ObjectProperty");
+			assert_type(e.key, "StringLiteral");
+			const target = e.key.value;
+			if (target !== lang) continue;
+			assert_type(e.value, "ArrowFunctionExpression");
+			if (e.value.body.type === "BlockStatement") {
+				new_properties.push(t.objectProperty(
+					t.stringLiteral(key),
+					e.value
+				));
+			}
+		}
+	}
+
+	var element = t.exportDefaultDeclaration(t.objectExpression(new_properties));
+	element.was_traksed = true;
+	path.replaceWith(element);
+};
+
+class Translations {
+	constructor(babel, babel_plugins, translations_path, metadata_path) {
+		this.seen_src_tags_map = {};
+		this.all_refs = [];
+		this.known_keys = {};
+		this.node_map = {};
+
+		this.translations_path = translations_path;
+
+		if (metadata_path) {
+			this.metadata_path = metadata_path;
+			this.metadata = JSON.parse(fs.readFileSync(this.metadata_path));
+		}
+		this.parse_translations_file(babel, babel_plugins);
+	}
+
+	parse_translations_file(babel, babel_plugins) {
+		var export_path;
+		const code = fs.readFileSync(this.translations_path).toString();
+		const tx = babel.transform(code, {
+			filename: this.translations_path,
+			babelrc: false,
+			plugins: [
+				babel_plugins,
+				function (babel) {
+					return {
+						visitor: {
+							ExportDefaultDeclaration(path) {
+								export_path = path;
+							}
+						}
+					};
+				}
+			]
+		});
+
+		const corrupt = (node, reason) => {
+			if (node) {
+				const at = this.translations_path + ":" + node.loc.start.line;
+				throw new Error("corrupt translations file at " + at + ": " + reason);
+			} else {
+				throw new Error("corrupt translations file (" + this.translations_path + "); " + reason);
+			}
+		};
+
+		const assert_type = (node, type) => {
+			if (node.type !== type) corrupt(node, "expected " + type + "; got " + node.type);
+		};
+
+		if (!export_path) corrupt(null, "found no default export");
+
+		const declaration = export_path.node.declaration;
+		assert_type(declaration, "ObjectExpression");
+
+		var translation_list = [];
+		for (const key_prop of declaration.properties) {
+			assert_type(key_prop, "ObjectProperty");
+			assert_type(key_prop.key, "StringLiteral");
+			const key = key_prop.key.value;
+			this.known_keys[key] = true;
+			const body = key_prop.value;
+			assert_type(body, "ObjectExpression");
+
+			var deps = null;
+			var is_new = false;
+			var is_deleted = false;
+			var is_fuzzy = false;
+			var context = "";
+			var refs = [];
+			var fn_bodies = [];
+			var metadata_fields = [];
+			this.node_map[key] = {}
+			for (const target_prop of body.properties) {
+				assert_type(target_prop, "ObjectProperty");
+				assert_type(target_prop.key, "StringLiteral");
+				const target = target_prop.key.value;
+				const value = target_prop.value;
+
+				const chk_bool = (field) => {
+					if (target !== field) return false;
+					assert_type(value, "BooleanLiteral");
+					if (!value.value) corrupt(value, "only 'true' is a valid value for " + field);
+					return true;
+				};
+
+				if (target[0] === "#") {
+					metadata_fields.push([target, code.slice(value.start, value.end)]);
+				} else if (chk_bool("_new")) {
+					is_new = true;
+				} else if (chk_bool("_deleted")) {
+					is_deleted = true;
+				} else if (chk_bool("_fuzzy")) {
+					is_fuzzy = true;
+				} else if (target === "_context") {
+					assert_type(value, "StringLiteral");
+					context = value.value;
+				} else if (target === "_refs") {
+					assert_type(value, "ArrayExpression");
+					for (const element of value.elements) {
+						assert_type(element, "StringLiteral");
+						const xs = element.value.split(":");
+						if (xs.length !== 2) corrupt(element, "ref not on <path>:<line> form");
+						const [path, line_str] = xs;
+						const line = parseInt(line_str, 10);
+						if (isNaN(line)) corrupt(element, "invalid line number in ref");
+						const ref = [path, line];
+						refs.push(ref);
+						this.all_refs.push(ref);
+					}
+				} else {
+					assert_type(value, "ArrowFunctionExpression");
+
+					var captured_deps = [];
+					for (const param of value.params) {
+						assert_type(param, "Identifier");
+						captured_deps.push(param.name);
+					}
+
+
+					if (deps === null) {
+						deps = captured_deps;
+					} else {
+						var match = true;
+						if (deps.length !== captured_deps.length) {
+							match = false;
+						} else {
+							for (var i = 0; i < deps.length; i++) {
+								if (deps[i] !== captured_deps[i]) {
+									match = false;
+									break;
+								}
+							}
+						}
+						if (!match) corrupt(value, "function param mismatch with earlier function; all must be identical");
+					}
+
+					const btype = value.body.type;
+					if (btype === "BlockStatement") {
+						fn_bodies.push([
+							target,
+							"block",
+							code.slice(value.body.start, value.body.end)
+						]);
+						this.node_map[key][target] = value;
+					} else {
+						fn_bodies.push([
+							target,
+							"expression",
+							code.slice(value.body.start, value.body.end)
+						]);
+						this.node_map[key][target] = value.body;
+					}
+				}
+			}
+
+			translation_list.push({key, deps, is_new, is_deleted, is_fuzzy, context, refs, fn_bodies, metadata_fields});
+		}
+
+		this.translation_list = translation_list;
+		this.preamble = code.slice(0, export_path.node.start);
+	}
+
+	lookup(key, lang) {
+		if (!this.node_map[key]) return undefined;
+		return this.node_map[key][lang];
+	}
+
+	visit_src(src) {
+		this.seen_src_tags_map[src] = [];
+	}
+
+	register_tag(src, tag) {
+		this.seen_src_tags_map[src].push(tag);
+	}
+
+	commit(opts) {
+		var n_new_translations = 0;
+		var n_deleted_translations = 0;
+
+		const tab = (n) => {
+			var s = "";
+			for (var i = 0; i < n; i++) s += opts.tab;
+			return s;
+		};
+
+		/* generate new translations */
+		var new_translations = {};
+		var new_translation_keys = [];
+		for (const src in this.seen_src_tags_map) {
+			for (const tag of this.seen_src_tags_map[src]) {
+				const key = tag.key;
+				if (this.known_keys[key]) {
+					continue;
+				}
+				var new_translation = new_translations[key];
+				if (!new_translation) {
+					var type;
+					var fn_body = "";
+					if (!tag.is_multiline) {
+						type = "expression";
+						fn_body += "<O>" + tag.body + "</O>";
+					} else {
+						type = "block";
+						var lines = [...tag.lines];
+						const last_line = lines.pop() || '';
+						const shift = () => lines.shift() || '';
+						fn_body += "{\n"
+						fn_body += tab(3) + "return (\n";
+						fn_body += tab(4) + "<O>" + shift() + "\n";
+						while (lines.length > 0) fn_body += tab(4) + shift() + "\n";
+						fn_body += tab(4) + last_line + "</O>\n"
+						fn_body += tab(3) + ");\n";
+						fn_body += tab(2) + "}";
+					}
+					new_translation = {
+						is_new: true,
+						key: key,
+						refs: [],
+						context: tag.context,
+						deps: tag.deps,
+						fn_bodies: opts.langs.map(lang => [lang, type, fn_body]),
+						metadata_fields: []
+					};
+					new_translations[key] = new_translation;
+					new_translation_keys.push(key);
+				}
+				new_translation.refs.push([src, tag.loc.start.line]);
+			}
+		}
+
+		/* generate new refs, and find deleted translations */
+		var src_exists = {};
+		for (var e of this.translation_list) {
+			var new_refs = [];
+			for (const [src, line] of e.refs) {
+				/* completely remove refs if src no longer
+				 * exists */
+				if (src_exists[src] === undefined) src_exists[src] = fs.existsSync(src);
+				if (!src_exists[src]) {
+					continue;
+				}
+
+				if (!this.seen_src_tags_map[src]) {
+					/* pass refs as-is for files not
+					 * visisted */
+					new_refs.push([src, line]);
+				} else {
+					/* for files visited, construct refs
+					 * from seen tags */
+					for (const tag of this.seen_src_tags_map[src]) {
+						if (tag.key === e.key) {
+							new_refs.push([src, tag.loc.start.line]);
+						}
+					}
+				}
+			}
+
+			/* no refs means the translation is deleted */
+			if (new_refs.length === 0 && !e.is_deleted) {
+				e.is_deleted = true;
+				n_deleted_translations++;
+			}
+
+			/* regenerate refs as an ordered set */
+			var new_ref_set = {};
+			for (const ref of new_refs) {
+				const key = ref[0] + ":" + ref[1];
+				new_ref_set[key] = ref;
+			}
+			e.refs = Object.values(new_ref_set).sort((a,b) => {
+				const [src_a, src_b] = [a[0], b[0]];
+				if (src_a < src_b) return -1;
+				if (src_a > src_b) return 1;
+				const [line_a, line_b] = [a[1], b[1]];
+				return line_a - line_b;
+			});
+		}
+
+		/* TODO fuzzyness! I need the metadata file for this, in order
+		 * to know the original context/deps/body */
+
+		for (const k of new_translation_keys) {
+			n_new_translations++;
+			const new_translation = new_translations[k];
+
+			if (opts.append) {
+				this.translation_list.push(new_translation);
+			} else {
+				/* !opts.append means "relative insertion"
+				 * which is a "best effort" attempt to find a
+				 * suitable translation insertion point
+				 * relative to other translations. if there are
+				 * translations in the same file, then the new
+				 * translation is "sandwiched in". otherwise,
+				 * an attempt is made to insert it after the
+				 * last translation in the first file that
+				 * comes before this one, lexicographically */
+				const new_ref = new_translation.refs[0];
+				var best_insertion_line_distance = undefined;
+				var best_insertion_index = undefined;
+				var lowest_line_number = undefined;
+				var lowest_line_number_index = undefined;
+				var closest_file = undefined;
+				var closest_file_line_number = undefined;
+				var closest_file_index = undefined;
+				const new_ref_line_number = new_ref[1];
+				for (var i = 0; i < this.translation_list.length; i++) {
+					const t = this.translation_list[i];
+					for (const existing_ref of t.refs) {
+						const existing_ref_line_number = existing_ref[1];
+						const existing_ref_file = existing_ref[0];
+						const new_ref_file = new_ref[0];
+
+						if (existing_ref_file !== new_ref_file) {
+							/* not same file */
+							if (new_ref_file > existing_ref_file) {
+								if (closest_file === undefined || existing_ref_file >= closest_file) {
+									closest_file = existing_ref_file;
+									if (closest_file_line_number === undefined || existing_ref_line_number > closest_file_line_number) {
+										closest_file_line_number = existing_ref_line_number;
+										closest_file_index = i;
+									}
+								}
+							}
+							continue;
+						}
+
+						if (lowest_line_number === undefined || existing_ref_line_number < lowest_line_number) {
+							lowest_line_number = existing_ref_line_number;
+							lowest_line_number_index = i;
+						}
+
+						const line_distance = new_ref_line_number - existing_ref_line_number;
+						if (line_distance < 1) continue;
+
+						if (best_insertion_line_distance === undefined || line_distance < best_insertion_line_distance) {
+							best_insertion_line_distance = line_distance;
+							best_insertion_index = i;
+						}
+					}
+				}
+
+				const insert_translation_at = (index) => {
+					this.translation_list.splice(index, 0, new_translation);
+				};
+				if (best_insertion_index !== undefined) {
+					insert_translation_at(best_insertion_index + 1);
+				} else if (lowest_line_number_index !== undefined) {
+					insert_translation_at(lowest_line_number_index);
+				} else if (closest_file_index !== undefined) {
+					insert_translation_at(closest_file_index + 1);
+				} else {
+					insert_translation_at(0);
+				}
+			}
+		}
+
+
+		var output = "";
+
+		output += this.preamble;
+		output += "export default {\n";
+		var first = true;
+		for (const e of this.translation_list) {
+			if (!first) output += "\n";
+			output += tab(1) + JSON.stringify(e.key) + ": {\n";
+
+			// rewrite metadata fields
+			for (const [metadata_key, metadata_body] of e.metadata_fields) {
+				output += tab(2) + JSON.stringify(metadata_key) + ": " + metadata_body + ",\n";
+			}
+
+			// write is_new, possibly
+			if (e.is_new) output += tab(2) + '"_new": true, // FIXME remove this line when translation is done\n';
+
+			// write is_deleted, possibly
+			if (e.is_deleted) output += tab(2) + '"_deleted": true, // FIXME translation has no references; delete this entire section if you no longer need it\n';
+
+			// write is_fuzzy, possibly
+			if (e.is_fuzzy) output += tab(2) + '"_fuzzy": true, // FIXME verify that source and translations match each other; delete this line when you are satisfied\n';
+
+			// write context, possibly
+			if (e.context.length > 0) output += tab(2) + '"_context": ' + JSON.stringify(e.context) + ",\n";
+
+			// write refs
+			if (e.refs.length === 0) {
+				output += tab(2) + '"_refs": [],\n';
+			} else {
+				output += tab(2) + '"_refs": [\n';
+				for (const ref of e.refs) {
+					var refstr = ref[0] + ":" + ref[1];
+					output += tab(3) + JSON.stringify(refstr) + ",\n";
+				}
+				output += tab(2) + '],\n';
+			}
+
+			// write translations
+			var fn_deps = (e.deps || []).join(", ");
+			for (const [target, type, fn_body] of e.fn_bodies) {
+				if (type === "block") {
+					output += tab(2) + JSON.stringify(target) + ": (" + fn_deps + ") => ";
+					output += fn_body;
+					output += ",\n";
+				} else if (type === "expression") {
+					output += tab(2) + JSON.stringify(target) + ": (" + fn_deps + ") => " + fn_body + ",\n";
+				} else {
+					throw new Error("invalid type: " + type);
+				}
+			}
+
+			output += tab(1) + "},\n";
+			first = false;
+		}
+		output += "}\n";
+
+		fs.writeFileSync(opts.translations_file, output);
+		console.log("\nDONE!");
+		console.log("  added:   " + n_new_translations);
+		console.log("  deleted: " + n_deleted_translations);
+	}
+}
+
+
+
+module.exports = { TraksError, is_translation_tag_node, process_path, replace, bake, bake_translations_export, options, Translations }
