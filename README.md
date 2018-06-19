@@ -57,7 +57,7 @@ You can then translate it and even handle plural/singular cases by changing it i
 The two most popular translation solutions for React are `react-intl` and `react-i18next`.
 Both have a verbose and unnatural syntax, and want you to assign keys to every translation.
 I have previously worked with `gettext` which is intuitive to work with, has a light syntax and it automatically
-extracts translation strings from your source code. So, I desired something similar for React.\
+extracts translation strings from your source code. So, I desired something similar for React.
 
 ### TODO
  - `gettext` has "fuzzy string matching" and I'd like something similar, e.g. if you change `<T>Hello world</T>` to 
