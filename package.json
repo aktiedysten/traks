@@ -1,13 +1,15 @@
 {
   "name": "traks",
-  "version": "1.0.2",
-  "description": "react translations without wanting to kill yourself. much.",
+  "version": "1.0.3",
+  "description": "Translations for React; Automatic, Kind and Superior",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node test.js"
   },
   "keywords": [
-    "translations"
+    "translations",
+    "i18n",
+    "react"
   ],
   "author": "Anders Kaare Straadt",
   "license": "CC0-1.0",

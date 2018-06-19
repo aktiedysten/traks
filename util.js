@@ -124,7 +124,21 @@ const process_path = (path) => {
 				deps.push(name);
 			},
 			Identifier: (path) => {
-				deps.push(path.node.name);
+				const p = path.parent;
+				if (p && p.type === 'MemberExpression') {
+					if (path.node === p.object) {
+						deps.push(path.node.name);
+					}
+				} else if (p && p.type === 'ObjectProperty') {
+					if (path.node === p.value) {
+						deps.push(path.node.name);
+					}
+				} else {
+					deps.push(path.node.name);
+				}
+			},
+			ThisExpression: (path) => {
+				throw path.buildCodeFrameError("'this' is not allowed within <T>-tags");
 			},
 			ArrowFunctionExpression: disallow_functions,
 			FunctionExpression: disallow_functions,
@@ -195,21 +209,16 @@ const process_path = (path) => {
 	};
 };
 
-const replace = (babel, path, keep_children) => {
-	if (path.node.was_traksed) return; // prevent infinite recursion...
-	const t = babel.types;
-	const { key, deps } = process_path(path);
-	const JT = t.jSXIdentifier(options.translation_tag);
-	const is_self_closing = !keep_children;
-	const children = keep_children ? path.node.children : [];
-
-	var attributes = [
+function get_key_deps_attributes(t, key, deps) {
+	return [
 		t.jSXAttribute(t.jSXIdentifier("k"), t.stringLiteral(key)),
 		t.jSXAttribute(t.jSXIdentifier("deps"), t.jSXExpressionContainer(t.arrayExpression(
 			deps.map(dep => t.identifier(dep))
 		))),
 	];
+}
 
+function patch_key_attr(attributes, path) {
 	/* preserve "key" attribute (it's React-specific) */
 	for (const attr of path.node.openingElement.attributes) {
 		const name = attr.name.name;
@@ -218,6 +227,20 @@ const replace = (babel, path, keep_children) => {
 			break;
 		}
 	}
+	return attributes;
+}
+
+const replace = (babel, path, keep_children) => {
+	if (path.node.was_traksed) return; // prevent infinite recursion...
+	const t = babel.types;
+	const { key, deps } = process_path(path);
+	const JT = t.jSXIdentifier(options.translation_tag);
+	const is_self_closing = !keep_children;
+	const children = keep_children ? path.node.children : [];
+
+	var attributes = get_key_deps_attributes(t, key, deps);
+
+	attributes = patch_key_attr(attributes, path);
 
 	var element = t.jSXElement(
 		t.jSXOpeningElement(JT, attributes, is_self_closing),
@@ -235,20 +258,19 @@ const bake = (babel, path, translations, lang) => {
 	const { key, deps } = process_path(path);
 
 	var node = translations.lookup(key, lang);
+	if (!node) throw path.buildCodeFrameError("translation not found: lookup(" + JSON.stringify(key) + ", " + JSON.stringify(lang) + ") failed");
+
 	var children;
 	var attributes;
 	if (node.type === "ArrowFunctionExpression") {
 		children = [];
-		attributes = [
-			t.jSXAttribute(t.jSXIdentifier("k"), t.stringLiteral(key)),
-			t.jSXAttribute(t.jSXIdentifier("deps"), t.jSXExpressionContainer(t.arrayExpression(
-				deps.map(dep => t.identifier(dep))
-			))),
-		];
+		attributes = get_key_deps_attributes(t, key, deps);
 	} else {
 		children = node.children;
 		attributes = [];
 	}
+
+	attributes = patch_key_attr(attributes, path);
 
 	const JT = t.jSXIdentifier(options.translation_tag);
 	const is_self_closing = false;
