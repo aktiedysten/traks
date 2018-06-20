@@ -45,6 +45,38 @@ const assert_non_nested_translation_path = (path) => {
 
 const is_react_component_name = (name) => name[0] === name[0].toUpperCase();
 
+const capture_dependencies = (root_path, deps) => {
+	const disallow_functions = (path) => {
+		throw new TraksError(get_filename(path), path.node.loc, "translation tags cannot have inline functions");
+	}
+	root_path.traverse({
+		JSXIdentifier: (path) => {
+			const name = path.node.name;
+			if (!is_react_component_name(name)) return; // ignore html (non-react component) tags
+			deps.push(name);
+		},
+		Identifier: (path) => {
+			const p = path.parent;
+			if (p && p.type === 'MemberExpression') {
+				if (path.node === p.object) {
+					deps.push(path.node.name);
+				}
+			} else if (p && p.type === 'ObjectProperty') {
+				if (path.node === p.value) {
+					deps.push(path.node.name);
+				}
+			} else {
+				deps.push(path.node.name);
+			}
+		},
+		ThisExpression: (path) => {
+			throw path.buildCodeFrameError("'this' is not allowed within <T>-tags");
+		},
+		ArrowFunctionExpression: disallow_functions,
+		FunctionExpression: disallow_functions,
+	});
+}
+
 const process_path = (path) => {
 	const node = path.node;
 
@@ -113,36 +145,8 @@ const process_path = (path) => {
 	 * also, functions are disallowed because they complicate
 	 * dependency analysis (you can always lift functions out of
 	 * translation tags, which is totally fine) */
-	const disallow_functions = (path) => {
-		throw new TraksError(get_filename(path), path.node.loc, "translation tags cannot have inline functions");
-	}
 	for (const child of path.get("children")) {
-		child.traverse({
-			JSXIdentifier: (path) => {
-				const name = path.node.name;
-				if (!is_react_component_name(name)) return; // ignore html (non-react component) tags
-				deps.push(name);
-			},
-			Identifier: (path) => {
-				const p = path.parent;
-				if (p && p.type === 'MemberExpression') {
-					if (path.node === p.object) {
-						deps.push(path.node.name);
-					}
-				} else if (p && p.type === 'ObjectProperty') {
-					if (path.node === p.value) {
-						deps.push(path.node.name);
-					}
-				} else {
-					deps.push(path.node.name);
-				}
-			},
-			ThisExpression: (path) => {
-				throw path.buildCodeFrameError("'this' is not allowed within <T>-tags");
-			},
-			ArrowFunctionExpression: disallow_functions,
-			FunctionExpression: disallow_functions,
-		});
+		capture_dependencies(child, deps);
 	}
 
 	/* convert deps into ordered set */
@@ -262,12 +266,12 @@ const bake = (babel, path, translations, lang) => {
 
 	var children;
 	var attributes;
-	if (node.type === "ArrowFunctionExpression") {
-		children = [];
-		attributes = get_key_deps_attributes(t, key, deps);
-	} else {
+	if (translations.can_inline(key, lang)) {
 		children = node.children;
 		attributes = [];
+	} else {
+		children = [];
+		attributes = get_key_deps_attributes(t, key, deps);
 	}
 
 	attributes = patch_key_attr(attributes, path);
@@ -285,33 +289,83 @@ const bake = (babel, path, translations, lang) => {
 	path.replaceWith(element);
 };
 
+const assert_type = (node, type) => {
+	if (node.type !== type) {
+		const at = ":" + node.loc.start.line;
+		const reason = "expected " + type + "; got " + node.type;
+		throw path.buildCodeFrameError("corrupt translations file at " + at + ": " + reason);
+	}
+};
+
+const unpack_translation_function = (path) => {
+	const node = path.node
+
+	var captured_deps = [];
+	var dep_set = {};
+	for (const param of node.params) {
+		assert_type(param, "Identifier");
+		captured_deps.push(param.name);
+		dep_set[param.name] = true;
+	}
+
+	var can_inline;
+
+	const btype = node.body.type;
+	if (btype === "BlockStatement") {
+		can_inline = false;
+	} else {
+		var body_deps = [];
+		for (const child of path.get("body").get("children")) {
+			capture_dependencies(child, body_deps);
+		}
+		can_inline = true;
+		for (const dep of body_deps) {
+			if (dep_set[dep]) continue;
+			can_inline = false;
+			break;
+		}
+	}
+
+	var fn_type, fn_node;
+	if (can_inline) {
+		fn_type = "expression";
+		fn_node = node.body;
+	} else {
+		fn_type = "block";
+		fn_node = node;
+	}
+
+	return {
+		captured_deps: captured_deps,
+		can_inline: can_inline,
+		fn_type: fn_type,
+		fn_node: fn_node,
+	};
+};
+
 const bake_translations_export = (babel, path, lang) => {
 	if (path.node.was_traksed) return; // prevent infinite recursion...
 	const t = babel.types;
-	const decl = path.node.declaration;
-
-	const assert_type = (node, type) => {
-		if (node.type !== type) {
-			const at = ":" + node.loc.start.line;
-			const reason = "expected " + type + "; got " + node.type;
-			throw path.buildCodeFrameError("corrupt translations file at " + at + ": " + reason);
-		}
-	};
+	const decl_path = path.get('declaration');
 
 	var new_properties = [];
-	assert_type(decl, "ObjectExpression");
-	for (const p of decl.properties) {
-		assert_type(p, "ObjectProperty");
-		assert_type(p.key, "StringLiteral");
-		assert_type(p.value, "ObjectExpression");
-		const key = p.key.value;
-		for (const e of p.value.properties) {
+	assert_type(decl_path.node, "ObjectExpression");
+	for (const prop_path of decl_path.get('properties')) {
+		const prop = prop_path.node;
+		assert_type(prop, "ObjectProperty");
+		assert_type(prop.key, "StringLiteral");
+		assert_type(prop.value, "ObjectExpression");
+		const key = prop.key.value;
+		for(const epath of prop_path.get('value').get('properties')) {
+			const e = epath.node;
 			assert_type(e, "ObjectProperty");
 			assert_type(e.key, "StringLiteral");
 			const target = e.key.value;
 			if (target !== lang) continue;
 			assert_type(e.value, "ArrowFunctionExpression");
-			if (e.value.body.type === "BlockStatement") {
+
+			const unpack = unpack_translation_function(epath.get('value'));
+			if (!unpack.can_inline) {
 				new_properties.push(t.objectProperty(
 					t.stringLiteral(key),
 					e.value
@@ -331,6 +385,7 @@ class Translations {
 		this.all_refs = [];
 		this.known_keys = {};
 		this.node_map = {};
+		this.can_inline_map = {};
 
 		this.translations_path = translations_path;
 
@@ -361,34 +416,24 @@ class Translations {
 			]
 		});
 
-		const corrupt = (node, reason) => {
-			if (node) {
-				const at = this.translations_path + ":" + node.loc.start.line;
-				throw new Error("corrupt translations file at " + at + ": " + reason);
-			} else {
-				throw new Error("corrupt translations file (" + this.translations_path + "); " + reason);
-			}
-		};
-
-		const assert_type = (node, type) => {
-			if (node.type !== type) corrupt(node, "expected " + type + "; got " + node.type);
-		};
-
 		if (!export_path) corrupt(null, "found no default export");
 
-		const declaration = export_path.node.declaration;
+		const declaration_path = export_path.get('declaration');
+		const declaration = declaration_path.node;
 		assert_type(declaration, "ObjectExpression");
 
 		var translation_list = [];
-		for (const key_prop of declaration.properties) {
+		for (const key_prop_path of declaration_path.get("properties")) {
+			const key_prop = key_prop_path.node;
 			assert_type(key_prop, "ObjectProperty");
 			assert_type(key_prop.key, "StringLiteral");
 			const key = key_prop.key.value;
 			this.known_keys[key] = true;
-			const body = key_prop.value;
-			assert_type(body, "ObjectExpression");
+			const body_path = key_prop_path.get("value");
+			assert_type(body_path.node, "ObjectExpression");
 
 			var deps = null;
+			var dep_set = {};
 			var is_new = false;
 			var is_deleted = false;
 			var is_fuzzy = false;
@@ -397,11 +442,14 @@ class Translations {
 			var fn_bodies = [];
 			var metadata_fields = [];
 			this.node_map[key] = {}
-			for (const target_prop of body.properties) {
+			this.can_inline_map[key] = {}
+			for (const target_prop_path of body_path.get("properties")) {
+				const target_prop = target_prop_path.node;
 				assert_type(target_prop, "ObjectProperty");
 				assert_type(target_prop.key, "StringLiteral");
 				const target = target_prop.key.value;
-				const value = target_prop.value;
+				const value_path = target_prop_path.get("value");
+				const value = value_path.node;
 
 				const chk_bool = (field) => {
 					if (target !== field) return false;
@@ -437,22 +485,17 @@ class Translations {
 				} else {
 					assert_type(value, "ArrowFunctionExpression");
 
-					var captured_deps = [];
-					for (const param of value.params) {
-						assert_type(param, "Identifier");
-						captured_deps.push(param.name);
-					}
-
+					const unpack = unpack_translation_function(value_path);
 
 					if (deps === null) {
-						deps = captured_deps;
+						deps = unpack.captured_deps;
 					} else {
 						var match = true;
-						if (deps.length !== captured_deps.length) {
+						if (deps.length !== unpack.captured_deps.length) {
 							match = false;
 						} else {
 							for (var i = 0; i < deps.length; i++) {
-								if (deps[i] !== captured_deps[i]) {
+								if (deps[i] !== unpack.captured_deps[i]) {
 									match = false;
 									break;
 								}
@@ -461,22 +504,13 @@ class Translations {
 						if (!match) corrupt(value, "function param mismatch with earlier function; all must be identical");
 					}
 
-					const btype = value.body.type;
-					if (btype === "BlockStatement") {
-						fn_bodies.push([
-							target,
-							"block",
-							code.slice(value.body.start, value.body.end)
-						]);
-						this.node_map[key][target] = value;
-					} else {
-						fn_bodies.push([
-							target,
-							"expression",
-							code.slice(value.body.start, value.body.end)
-						]);
-						this.node_map[key][target] = value.body;
-					}
+					fn_bodies.push([
+						target,
+						unpack.fn_type,
+						code.slice(value.body.start, value.body.end),
+					]);
+					this.node_map[key][target] = unpack.fn_node;
+					this.can_inline_map[key][target] = unpack.can_inline;
 				}
 			}
 
@@ -490,6 +524,11 @@ class Translations {
 	lookup(key, lang) {
 		if (!this.node_map[key]) return undefined;
 		return this.node_map[key][lang];
+	}
+
+	can_inline(key, lang) {
+		if (!this.can_inline_map[key]) return undefined;
+		return this.can_inline_map[key][lang];
 	}
 
 	visit_src(src) {

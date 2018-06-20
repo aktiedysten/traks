@@ -1,4 +1,5 @@
 const babel = require('babel-core');
+const util = require('./util');
 const fs = require('fs');
 
 function require_force(module) {
@@ -134,6 +135,55 @@ const tests = [
 			t.assert_prop_is('k', "15cffb8e9313");
 			t.assert_prop_is('deps', []);
 		});
+
+		/* simple translations referencing non-deps must also be
+		 * referenced by key */
+		transform_test('FOO="some dep";<T>almost too simple {FOO}</T>', bake_opts, (t) => {
+			t.assert_children_is(undefined);
+			t.assert_prop_is('k', "00f9c09179a5");
+			t.assert_prop_is('deps', ["some dep"]);
+		});
+	}],
+
+	['baking of traks-translations.js', () => {
+		const filename = 'test-fixtures/dummy-traks-translations.js';
+		const code = fs.readFileSync(filename).toString();
+		var export_path;
+		const tx = babel.transform(code, {
+			filename: filename,
+			babelrc: false,
+			plugins: [
+				'babel-plugin-syntax-jsx',
+				'babel-plugin-syntax-object-rest-spread',
+				'babel-plugin-syntax-class-properties',
+				function (babel) {
+					return {
+						visitor: {
+							ExportDefaultDeclaration(path) {
+								util.bake_translations_export(babel, path, "da");
+								export_path = path;
+							}
+						}
+					};
+				}
+			]
+		});
+
+		if (!export_path) assert(false, "no export path found");
+
+		var key_set = {};
+		var key_type = {};
+		for (const prop of export_path.node.declaration.properties) {
+			key_set[prop.key.value] = true;
+			key_type[prop.key.value] = prop.value.body.type;
+		}
+
+		assert(!key_set["e5410e122e8c"], "simple expression translations must not be in the translations file (should be inlined)");
+		assert(key_set["15cffb8e9313"], "complex block statement translation wasn't found in translations file (implies it was inlined?)");
+		assert(key_set["00f9c09179a5"], "simple expression translation with local references wasn't found in translations file (cannot be inlined)");
+
+		assert(key_type["15cffb8e9313"] === "BlockStatement");
+		assert(key_type["00f9c09179a5"] === "JSXElement");
 	}],
 
 	['key attribute is passed as-is', () => {
