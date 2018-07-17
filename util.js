@@ -45,6 +45,11 @@ const assert_non_nested_translation_path = (path) => {
 
 const is_react_component_name = (name) => name[0] === name[0].toUpperCase();
 
+function get_true_identifier_name(node) {
+	if (node.loc.identifierName) return node.loc.identifierName;
+	return node.name;
+}
+
 const capture_dependencies = (root_path, deps) => {
 	const disallow_functions = (path) => {
 		throw new TraksError(get_filename(path), path.node.loc, "translation tags cannot have inline functions");
@@ -57,17 +62,19 @@ const capture_dependencies = (root_path, deps) => {
 		},
 		Identifier: (path) => {
 			const p = path.parent;
+			var do_extract_name = false;
 			if (p && p.type === 'MemberExpression') {
 				if (path.node === p.object) {
-					deps.push(path.node.name);
+					do_extract_name = true;
 				}
 			} else if (p && p.type === 'ObjectProperty') {
 				if (path.node === p.value) {
-					deps.push(path.node.name);
+					do_extract_name = true;
 				}
 			} else {
-				deps.push(path.node.name);
+				do_extract_name = true;
 			}
+			if (do_extract_name) deps.push(get_true_identifier_name(path.node));
 		},
 		ThisExpression: (path) => {
 			throw path.buildCodeFrameError("'this' is not allowed within <T>-tags");
