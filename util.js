@@ -561,15 +561,21 @@ class Translations {
 			return s;
 		};
 
-		/* generate new translations */
 		var new_translations = {};
 		var new_translation_keys = [];
+		var seen_key_refs = {};
 		for (const src in this.seen_src_tags_map) {
 			for (const tag of this.seen_src_tags_map[src]) {
 				const key = tag.key;
+				const ref = [src, tag.loc.start.line];
+				if (!seen_key_refs[key]) seen_key_refs[key] = [];
+				seen_key_refs[key].push(ref);
+
 				if (this.known_keys[key]) {
 					continue;
 				}
+
+				/* generate new translation */
 				var new_translation = new_translations[key];
 				if (!new_translation) {
 					var type;
@@ -602,13 +608,19 @@ class Translations {
 					new_translations[key] = new_translation;
 					new_translation_keys.push(key);
 				}
-				new_translation.refs.push([src, tag.loc.start.line]);
+				new_translation.refs.push(ref);
 			}
 		}
 
 		/* generate new refs, and find deleted translations */
 		var src_exists = {};
 		for (var e of this.translation_list) {
+			if (seen_key_refs[e.key]) {
+				for (const ref of seen_key_refs[e.key]) {
+					e.refs.push(ref);
+				}
+			}
+
 			var new_refs = [];
 			for (const [src, line] of e.refs) {
 				/* completely remove refs if src no longer

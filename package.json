@@ -1,6 +1,6 @@
 {
   "name": "traks",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Translations for React; Automatic, Kind and Superior",
   "main": "index.js",
   "scripts": {
