@@ -248,7 +248,19 @@ function run_update(opts) {
 	})();
 
 	const babel_plugins = opts.babel_plugins.map(p => require.resolve(p));
-	var translations = new util.Translations(babel, babel_plugins, opts.translations_file, opts.metadata_file);
+
+	/* decode vim-friendly / human-readable refs */
+	var cached_refs = {};
+	if (cache.refs) {
+		for (const key in cache.refs) {
+			cached_refs[key] = [];
+			for (const ref of cache.refs[key]) {
+				cached_refs[key].push(ref.split(":"));
+			}
+		}
+	}
+
+	var translations = new util.Translations(babel, babel_plugins, opts.translations_file, opts.metadata_file, cached_refs);
 
 	for (const src of sources) {
 		var actual_sha256 = crypto.createHash('sha256').update(fs.readFileSync(src)).digest('hex');
@@ -285,8 +297,17 @@ function run_update(opts) {
 
 	if (translations) {
 		translations.commit(opts);
+
+		/* re-encode vim-friendly / human-readable refs */
+		cache.refs = {};
+		for (const key in cached_refs) {
+			cache.refs[key] = [];
+			for (const [file, line] of cached_refs[key]) {
+				cache.refs[key].push(file + ":" + line);
+			}
+		}
 	}
-	fs.writeFileSync(opts.cache_file, JSON.stringify(cache));
+	fs.writeFileSync(opts.cache_file, JSON.stringify(cache, null, "\t"));
 }
 
 function run() {

@@ -387,9 +387,8 @@ const bake_translations_export = (babel, path, lang) => {
 };
 
 class Translations {
-	constructor(babel, babel_plugins, translations_path, metadata_path) {
+	constructor(babel, babel_plugins, translations_path, metadata_path, refs) {
 		this.seen_src_tags_map = {};
-		this.all_refs = [];
 		this.known_keys = {};
 		this.node_map = {};
 		this.can_inline_map = {};
@@ -400,6 +399,10 @@ class Translations {
 			this.metadata_path = metadata_path;
 			this.metadata = JSON.parse(fs.readFileSync(this.metadata_path));
 		}
+
+		if (!refs) refs = {};
+		this.refs = refs;
+
 		this.parse_translations_file(babel, babel_plugins);
 	}
 
@@ -429,7 +432,7 @@ class Translations {
 		const declaration = declaration_path.node;
 		assert_type(declaration, "ObjectExpression");
 
-		var translation_list = [];
+		this.translation_list = [];
 		for (const key_prop_path of declaration_path.get("properties")) {
 			const key_prop = key_prop_path.node;
 			assert_type(key_prop, "ObjectProperty");
@@ -445,7 +448,8 @@ class Translations {
 			var is_deleted = false;
 			var is_fuzzy = false;
 			var context = "";
-			var refs = [];
+			if (!this.refs[key]) this.refs[key] = [];
+			var refs = this.refs[key];
 			var fn_bodies = [];
 			var metadata_fields = [];
 			this.node_map[key] = {}
@@ -477,6 +481,9 @@ class Translations {
 					assert_type(value, "StringLiteral");
 					context = value.value;
 				} else if (target === "_refs") {
+					/* legacy support for traks versions
+					 * 1.0.7 and below; refs were moved to
+					 * cache file in v1.0.8+ */
 					assert_type(value, "ArrayExpression");
 					for (const element of value.elements) {
 						assert_type(element, "StringLiteral");
@@ -487,7 +494,6 @@ class Translations {
 						if (isNaN(line)) corrupt(element, "invalid line number in ref");
 						const ref = [path, line];
 						refs.push(ref);
-						this.all_refs.push(ref);
 					}
 				} else {
 					assert_type(value, "ArrowFunctionExpression");
@@ -521,10 +527,9 @@ class Translations {
 				}
 			}
 
-			translation_list.push({key, deps, is_new, is_deleted, is_fuzzy, context, refs, fn_bodies, metadata_fields});
+			this.translation_list.push({key, deps, is_new, is_deleted, is_fuzzy, context, refs, fn_bodies, metadata_fields});
 		}
 
-		this.translation_list = translation_list;
 		this.preamble = code.slice(0, export_path.node.start);
 	}
 
@@ -755,18 +760,6 @@ class Translations {
 			// write context, possibly
 			if (e.context.length > 0) output += tab(2) + '"_context": ' + JSON.stringify(e.context) + ",\n";
 
-			// write refs
-			if (e.refs.length === 0) {
-				output += tab(2) + '"_refs": [],\n';
-			} else {
-				output += tab(2) + '"_refs": [\n';
-				for (const ref of e.refs) {
-					var refstr = ref[0] + ":" + ref[1];
-					output += tab(3) + JSON.stringify(refstr) + ",\n";
-				}
-				output += tab(2) + '],\n';
-			}
-
 			// write translations
 			var fn_deps = (e.deps || []).join(", ");
 			for (const [target, type, fn_body] of e.fn_bodies) {
@@ -790,6 +783,10 @@ class Translations {
 		console.log("\nDONE!");
 		console.log("  added:   " + n_new_translations);
 		console.log("  deleted: " + n_deleted_translations);
+
+		/* update refs passed to constructor (it's an input/output
+		 * value */
+		for (const t of this.translation_list) this.refs[t.key] = t.refs;
 	}
 }
 
