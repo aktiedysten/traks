@@ -1,4 +1,5 @@
 const React = require('react');
+const ReactDOMServer = require('react-dom/server');
 
 module.exports = function(opts) {
 	var ctx_value = {
@@ -31,7 +32,7 @@ module.exports = function(opts) {
 
 	var TraksProvider = function(props) {
 		React.Component.call(this, props);
-		this.state = {lang: opts.default_lang}
+		this.state = {lang: props.lang || opts.default_lang}
 	}
 	TraksProvider.prototype = Object.create(React.Component.prototype);
 	TraksProvider.prototype.constructor = TraksProvider;
@@ -55,11 +56,17 @@ module.exports = function(opts) {
 				if (value === undefined) {
 					throw new Error("<TraksConsumer> tag not used inside <TraksProvider/>");
 				}
+				const render_static = function (element) {
+					return ReactDOMServer.renderToStaticMarkup(
+						React.createElement(TraksProvider, {value: value, lang: value.lang}, element)
+					);
+				};
 				return React.cloneElement(
 					props.children,
 					{
 						lang: value.lang,
-						set_lang: value.set_lang
+						set_lang: value.set_lang,
+						render_static: render_static
 					}
 				);
 			}

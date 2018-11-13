@@ -1,4 +1,5 @@
 const React = require('react');
+const ReactDOMServer = require('react-dom/server');
 
 module.exports = function(opts) {
 	const T = function (props) {
@@ -15,11 +16,15 @@ module.exports = function(opts) {
 	}
 
 	const TraksConsumer = function (props) {
+		const render_static = function (element) {
+			return ReactDOMServer.renderToStaticMarkup(element);
+		};
 		return React.cloneElement(
 			props.children,
 			{
 				lang: opts.lang,
-				set_lang: opts.set_lang
+				set_lang: opts.set_lang,
+				render_static: render_static,
 			}
 		);
 	};
