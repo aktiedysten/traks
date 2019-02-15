@@ -271,6 +271,15 @@ const bake = (babel, path, translations, lang) => {
 	var node = translations.lookup(key, lang);
 	if (!node) throw path.buildCodeFrameError("translation not found: lookup(" + JSON.stringify(key) + ", " + JSON.stringify(lang) + ") failed");
 
+	/* Clone entire node subtree to prevent the same object reference from
+	 * being used multiple times. This is necessary because some later
+	 * transforms are not "pure" (i.e. they have side-effects; the node
+	 * object itself is being modified). Making a deep clone prevents a
+	 * problem where using identical <T/> snippets twice or more can cause
+	 * a "syntax error" (it expects a JSX* node but instead sees a
+	 * CallExpression) */
+	node = t.cloneDeep(node);
+
 	var children;
 	var attributes;
 	if (translations.can_inline(key, lang)) {
