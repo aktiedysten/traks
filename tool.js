@@ -49,7 +49,12 @@ const update_defaults = {
 	metadata_file: "traks-metadata.json",
 	cache_file: ".traks-cache.json",
 
-	babel_plugins: ['babel-plugin-syntax-jsx', 'babel-plugin-syntax-object-rest-spread', 'babel-plugin-syntax-class-properties'],
+	babel_plugins: [
+		'babel-plugin-syntax-jsx',
+		'babel-plugin-syntax-object-rest-spread',
+		'babel-plugin-syntax-class-properties',
+		'babel-plugin-dynamic-import-node',
+	],
 
 	tab: "\t"
 }
