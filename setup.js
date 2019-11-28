@@ -41,9 +41,9 @@ module.exports = function(opts) {
 			translation_missing_component: opts.translation_missing_component,
 			translations: opts.translations,
 			lang: this.state.lang,
-			set_lang: (function (lang) {
+			set_lang: opts.set_lang || (function (lang) {
 				this.setState({lang: lang});
-			}).bind(this)
+			}).bind(this),
 		}
 		return React.createElement(ctx.Provider, {value: value}, this.props.children);
 	};
