@@ -263,13 +263,18 @@ const replace = (babel, path, keep_children) => {
 	path.replaceWith(element);
 };
 
-const bake = (babel, path, translations, lang) => {
+const bake = (babel, path, translations, try_langs) => {
 	if (path.node.was_traksed) return; // prevent infinite recursion...
 	const t = babel.types;
 	const { key, deps } = process_path(path);
 
-	var node = translations.lookup(key, lang);
-	if (!node) throw path.buildCodeFrameError("translation not found: lookup(" + JSON.stringify(key) + ", " + JSON.stringify(lang) + ") failed");
+	var lang, node;
+	for (lang of try_langs) {
+		node = translations.lookup(key, lang);
+		if (node) break;
+	}
+
+	if (!node) throw path.buildCodeFrameError("translation not found: lookup(" + JSON.stringify(key) + ", " + JSON.stringify(try_langs) + ") failed");
 
 	/* Clone entire node subtree to prevent the same object reference from
 	 * being used multiple times. This is necessary because some later

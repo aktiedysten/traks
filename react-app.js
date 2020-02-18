@@ -5,7 +5,9 @@ const fs = require('fs');
 const build_env = process.env.BABEL_ENV || process.env.NODE_ENV;
 const keep_children = build_env === 'development';
 const bake_lang = process.env.TRAKS_BAKE_LANG;
+const fallback_lang = process.env.TRAKS_FALLBACK_LANG;
 const translations_file = process.env.TRAKS_TRANSLATIONS_FILE;
+var try_langs;
 var translations;
 if (bake_lang) {
 	if (!translations_file) {
@@ -15,6 +17,9 @@ if (bake_lang) {
 	const babel = require('babel-core');
 	// XXX babel-plugins should be the same as during 'traks update'...
 	translations = new util.Translations(babel, ['babel-plugin-syntax-jsx', 'babel-plugin-syntax-object-rest-spread', 'babel-plugin-syntax-class-properties'], translations_file);
+
+	try_langs = [bake_lang];
+	if (fallback_lang) try_langs.push(fallback_lang);
 }
 
 const traksform = (babel) => {
@@ -33,7 +38,7 @@ const traksform = (babel) => {
 				if (!util.is_translation_tag_node(path.node)) return;
 				try {
 					if (bake_lang) {
-						util.bake(babel, path, translations, bake_lang);
+						util.bake(babel, path, translations, try_langs);
 					} else {
 						util.replace(babel, path, keep_children);
 					}
