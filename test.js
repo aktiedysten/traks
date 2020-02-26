@@ -160,7 +160,7 @@ const tests = [
 					return {
 						visitor: {
 							ExportDefaultDeclaration(path) {
-								util.bake_translations_export(babel, path, "da");
+								util.bake_translations_export(babel, path, ["da"]);
 								export_path = path;
 							}
 						}

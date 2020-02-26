@@ -364,7 +364,7 @@ const unpack_translation_function = (path) => {
 	};
 };
 
-const bake_translations_export = (babel, path, lang) => {
+const bake_translations_export = (babel, path, try_langs) => {
 	if (path.node.was_traksed) return; // prevent infinite recursion...
 	const t = babel.types;
 	const decl_path = path.get('declaration');
@@ -377,21 +377,34 @@ const bake_translations_export = (babel, path, lang) => {
 		assert_type(prop.key, "StringLiteral");
 		assert_type(prop.value, "ObjectExpression");
 		const key = prop.key.value;
-		for(const epath of prop_path.get('value').get('properties')) {
+		var lang_epath_map = {};
+		for (const epath of prop_path.get('value').get('properties')) {
 			const e = epath.node;
 			assert_type(e, "ObjectProperty");
 			assert_type(e.key, "StringLiteral");
-			const target = e.key.value;
-			if (target !== lang) continue;
-			assert_type(e.value, "ArrowFunctionExpression");
+			const target_lang = e.key.value;
+			lang_epath_map[target_lang] = epath;
+		}
 
-			const unpack = unpack_translation_function(epath.get('value'));
-			if (!unpack.can_inline) {
-				new_properties.push(t.objectProperty(
-					t.stringLiteral(key),
-					e.value
-				));
+		var use_epath;
+		for (const lang of try_langs) {
+			var epath = lang_epath_map[lang];
+			if (epath) {
+				use_epath = epath;
+				break;
 			}
+		}
+
+		if (!use_epath) throw new Error("use_epath is not set");
+
+		assert_type(use_epath.node.value, "ArrowFunctionExpression");
+
+		const unpack = unpack_translation_function(use_epath.get('value'));
+		if (!unpack.can_inline) {
+			new_properties.push(t.objectProperty(
+				t.stringLiteral(key),
+				use_epath.node.value
+			));
 		}
 	}
 

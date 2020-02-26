@@ -28,7 +28,7 @@ const traksform = (babel) => {
 		visitor: {
 			ExportDefaultDeclaration(path) {
 				if (bake_lang && fs.realpathSync(path.hub.file.opts.filename) === fs.realpathSync(translations_file)) {
-					util.bake_translations_export(babel, path, bake_lang);
+					util.bake_translations_export(babel, path, try_langs);
 				}
 				/* TODO also remove underscore-prefixed fields,
 				 * like _refs? or, do we always bake in
