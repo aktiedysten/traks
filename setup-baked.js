@@ -11,7 +11,7 @@ module.exports = function(opts) {
 		}
 	};
 
-	var TraksProvider = function(props) {
+	let TraksProvider = function(props) {
 		return props.children;
 	}
 

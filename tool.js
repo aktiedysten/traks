@@ -1,6 +1,5 @@
-const babel = require('babel-core');
+const babel = require('@babel/core');
 const fs = require('fs');
-const crypto = require('crypto');
 const fspath = require('path');
 const util = require('./util');
 
@@ -36,18 +35,15 @@ function readline() {
 	}
 }
 
-const update_defaults = {
+const default_options = {
 	langs: ['en'],
 	src_dirs: ["src"],
 	jsx_exts: ["js", "jsx"],
 
 	append: false,
-	fuzzyness: 0.15,
 
 	translations_file: "src/traks-translations.js",
 	import_file: "src/traks.js",
-	metadata_file: "traks-metadata.json",
-	cache_file: ".traks-cache.json",
 
 	babel_plugins: [
 		'babel-plugin-syntax-jsx',
@@ -59,24 +55,34 @@ const update_defaults = {
 	tab: "\t"
 }
 
+const resolve_options = (opts) => {
+	return {
+		...default_options,
+		...(opts||{}),
+	};
+};
+
+function print_options(opts) {
+	console.log("OPTIONS:");
+	const popt = (opt) => {
+		let value = opts[opt];
+		if (typeof value === "object") value = value.join(",");
+		console.log("  " + opt + ": " + value);
+	};
+	popt('langs');
+	popt('src_dirs');
+	popt('jsx_exts');
+	console.log("  insert mode: " + (opts.append ? "append" : "relative insert"));
+	popt('translations_file');
+	popt('babel_plugins');
+}
+
+const construct_translations_object = (opts) => new util.Translations(babel, opts.babel_plugins, opts.translations_file);
+
 function run_update(opts) {
-	console.log("update options:");
-	{
-		const popt = (opt) => {
-			var value = opts[opt];
-			if (typeof value === "object") value = value.join(",");
-			console.log("  " + opt + ": " + value);
-		};
-		popt('langs');
-		popt('src_dirs');
-		popt('jsx_exts');
-		console.log("  insert mode: " + (opts.append ? "append" : "relative insert"));
-		popt('fuzzyness');
-		popt('translations_file');
-		popt('metadata_file');
-		popt('cache_file');
-		popt('babel_plugins');
-	}
+	opts = resolve_options(opts);
+
+	print_options(opts);
 
 	const rl = readline();
 
@@ -139,7 +145,7 @@ function run_update(opts) {
 	);
 
 	const mk_import = (from, to) => {
-		var imp = fspath.relative(fspath.dirname(from), to);
+		let imp = fspath.relative(fspath.dirname(from), to);
 		const p = fspath.parse(imp);
 		imp = fspath.join(p.dir, p.name);
 		if (imp[0] !== ".") imp = "./" + imp;
@@ -156,7 +162,7 @@ function run_update(opts) {
 			"import React from 'react';",
 			"import translations from '" + mk_import(opts.import_file, opts.translations_file) + "';",
 			"",
-			"var setup, module;",
+			"let setup, module;",
 			"/* The Traks Babel-plugin replaces the \"TRAKS_COMPILE_TIME_MAGICK_CONST__*\"",
 			" * string literals with true or false at compile time based on build mode set",
 			" * via environment variables */",
@@ -212,28 +218,16 @@ function run_update(opts) {
 		]
 	);
 
-	required_file(
-		opts.metadata_file,
-
-		"This file contains metadata used by 'update'. You should put it in source control, but never edit it.",
-
-		"{}"
-	);
-
-	if (!fs.existsSync(opts.cache_file)) {
-		fs.writeFileSync(opts.cache_file, "{}");
-	}
-	var cache = JSON.parse(fs.readFileSync(opts.cache_file));
-
-	if (!cache.sources) cache.sources = {};
-
 	const sources = (() => {
-		var sources = [];
-		var rec; rec = function (path) {
+		let exclude_dirs = util.array2set(opts.exclude_dirs);
+		let exclude_files = util.array2set(opts.exclude_files);
+		let sources = [];
+		let rec; rec = function (path) {
 			const st = fs.statSync(path);
 			if (st.isFile()) {
+				if (exclude_files[fspath.basename(path)]) return;
 				const ext = fspath.extname(path).toLowerCase();
-				var is_jsx = false;
+				let is_jsx = false;
 				for (const src_ext of opts.jsx_exts) {
 					if (ext === ("." + src_ext)) {
 						is_jsx = true;
@@ -242,6 +236,7 @@ function run_update(opts) {
 				}
 				if (is_jsx) sources.push(path);
 			} else if (st.isDirectory()) {
+				if (exclude_dirs[fspath.basename(path)]) return;
 				for (const sub of fs.readdirSync(path)) {
 					rec(fspath.join(path, sub));
 				}
@@ -252,202 +247,57 @@ function run_update(opts) {
 		return sources;
 	})();
 
-	const babel_plugins = opts.babel_plugins.map(p => require.resolve(p));
-
-	/* decode vim-friendly / human-readable refs */
-	var cached_refs = {};
-	if (cache.refs) {
-		for (const key in cache.refs) {
-			cached_refs[key] = [];
-			for (const ref of cache.refs[key]) {
-				cached_refs[key].push(ref.split(":"));
-			}
-		}
-	}
-
-	var translations = new util.Translations(babel, babel_plugins, opts.translations_file, opts.metadata_file, cached_refs);
+	let translations = construct_translations_object(opts);
 
 	for (const src of sources) {
-		var actual_sha256 = crypto.createHash('sha256').update(fs.readFileSync(src)).digest('hex');
-		var do_update = false;
-		if (!cache.sources[src]) {
-			cache.sources[src] = {};
-			do_update = true;
-		} else if (cache.sources[src].sha256 !== actual_sha256) {
-			do_update = true;
-		}
-		cache.sources[src].sha256 = actual_sha256;
-		if (!do_update) continue;
-
 		translations.visit_src(src);
 
-		var translation_paths = [];
-		const tx = babel.transformFileSync(src, { babelrc: false, plugins: [
-			...babel_plugins,
-			function (babel) {
-				return {
-					visitor: {
-						JSXElement(path) {
-							if (!util.is_translation_tag_node(path.node)) return;
-							translation_paths.push(path);
+		let translation_paths = [];
+		const tx = babel.transformFileSync(src, {
+			babelrc: false,
+			configFile: false,
+			plugins: [
+				...opts.babel_plugins,
+				[function (babel) {
+					return {
+						visitor: {
+							JSXElement(path) {
+								if (!util.is_translation_tag_node(path.node)) return;
+								translation_paths.push(path);
+							}
 						}
-					}
-				};
-			}
-		]});
+					};
+				}, {legacy:true}]
+			],
+		});
 
 		const tags = translation_paths.map(path => util.process_path(path));
 		for (const tag of tags) translations.register_tag(src, tag);
 	}
 
-	if (translations) {
-		translations.commit(opts);
-
-		/* re-encode vim-friendly / human-readable refs */
-		cache.refs = {};
-		for (const key in cached_refs) {
-			cache.refs[key] = [];
-			for (const [file, line] of cached_refs[key]) {
-				cache.refs[key].push(file + ":" + line);
-			}
-		}
-	}
-	fs.writeFileSync(opts.cache_file, JSON.stringify(cache, null, "\t"));
+	if (translations) translations.commit(opts);
 }
 
-function run() {
-	const args = process.argv.slice(2);
+function run_export_translations(opts) {
+	print_options(opts);
+	const path = "traks-export.json";
+	console.log("Exporting " + path + " ...");
+	opts = resolve_options(opts);
+	let translations = construct_translations_object(opts);
+	let ex = translations.export_json();
+	fs.writeFileSync(path, JSON.stringify(ex, null, 2));
+}
 
-	var arg;
-	const usage = (err) => {
-		if (err) console.error("ERROR: " + err);
-		console.error("usage: " + process.argv[1] + " [-v|--verbose] <command> ...");
-		if (err) process.exit(1);
-	}
-	const shift = () => { arg = args.shift(); return arg; }
-	const is_opt = () => arg[0] === "-";
-	const is_opt_of = (s, l) => {
-		if (!is_opt()) return false;
-		if (s && arg.slice(0,1) === "-" && arg.slice(1) === s) return true;
-		if (l && arg.slice(0,2) === "--" && arg.slice(2) === l) return true;
-		return false;
-	};
-	const get_arg = () => {
-		var opt = arg;
-		var arg = shift();
-		if (arg === undefined) usage("expected argument for " + opt);
-		return arg;
-	}
-	const invalid = () => {
-		if (is_opt()) {
-			usage("invalid option " + arg);
-		} else {
-			usage("invalid positional argument '" + arg + "'");
-		}
-	}
-
-	var verbose = false;
-	var cmd;
-	while (shift()) {
-		if (is_opt()) {
-			if (is_opt_of("v", "verbose")) {
-				verbose = true;
-			} else {
-				invalid();
-			}
-		} else {
-			cmd = arg;
-			break;
-		}
-	}
-
-	if (!cmd) usage("no command given, try 'help'");
-
-	if (cmd === "help") {
-		usage();
-		const help_defaults = (list) => {
-			for (var [msg, def] of list) {
-				msg = "    " + msg;
-				if (def) {
-					if (typeof def === "object") def = def.join(",");
-					msg += "  (default: " + def + ")";
-				}
-				console.log(msg);
-			}
-		}
-		console.log();
-		console.log("commands:");
-		console.log("  help       - you're watching it!");
-		console.log("  intro      - info on how to get started");
-		console.log("  update     - update translations");
-		help_defaults([
-			["-L/--langs              list of languages to generate", update_defaults.langs],
-			["-a/--append             append new translations to end of list (instead of relative insert)"],
-			["-z/--fuzzyness          threshold for fuzzyness [0:1], 0 means 'none'", update_defaults.fuzzyness],
-			["-s/--src-dirs           list of source directories to consider", update_defaults.src_dirs],
-			["-e/--jsx-exts           list of extensions to consider", update_defaults.jsx_exts],
-			["-T/--translations-file  where translations are [vcs/edit]", update_defaults.translations_file],
-			["-I/--import-file        file you should import from React [vcs/edit]", update_defaults.import_file],
-			["-M/--metadata-file      where metadata is stored [vcs/!edit]", update_defaults.metadata_file],
-			["-C/--cache-file         cache for faster updates; safe to remove [!vcs/!edit]", update_defaults.cache_file],
-			["  - 'vcs' means you should put this file under version control, '!vcs' means you should not"],
-			["  - 'edit' means you can/should edit this file manually, '!edit' means you should not"],
-			["-P/--babel-plugins    ", update_defaults.babel_plugins],
-		]);
-	} else if (cmd === "intro") {
-		console.log();
-		console.log("If you're using create-react-app, you must do the following:");
-		console.log(" - eject your react app with 'npm run eject'; note that this is irreversible");
-		console.log(" - change the babel preset from 'react-app' to 'traks/react-app' in your package.json");
-		console.log();
-		console.log("If you're not using create-react-app you need to figure out how to roll the");
-		console.log("traks babel plugin into your build/compilation step; see traks/react-app.js for")
-		console.log("inspiration. Traks will not work without this plugin.");
-		console.log();
-		console.log("After that, run traks update (with appropriate args); it will set up the files you need");
-		console.log("and provide further information. E.g. /path/to/traks update --langs en,de,fr");
-		console.log("Consider putting the 'traks update' command in a script of its own because you probably");
-		console.log("wan to always run it with the same arguments. See 'traks help' for a list of accepted arguments.");
-		console.log();
-	} else if (cmd === "update") {
-		var options = {...update_defaults};
-		while (shift()) {
-			if (is_opt()) {
-				if (is_opt_of("L", "langs")) {
-					options.langs = get_arg().split(",");
-				} else if (is_opt_of("a", "append")) {
-					options.append = true;
-				} else if (is_opt_of("z", "fuzzyness")) {
-					options.fuzzyness = parseFloat(get_arg());
-					if (isNaN(options.fuzzyness)) usage("fuzzyness value is not a number");
-				} else if (is_opt_of("s", "src-dirs")) {
-					options.src_dirs = get_arg().split(",");
-				} else if (is_opt_of("e", "jsx-exts")) {
-					options.jsx_exts = get_arg().split(",");
-				} else if (is_opt_of("T", "translations-file")) {
-					options.translations_file = get_arg();
-				} else if (is_opt_of("I", "import-file")) {
-					options.import_file = get_arg();
-				} else if (is_opt_of("M", "metadata-file")) {
-					options.metadata_file = get_arg();
-				} else if (is_opt_of("C", "cache-file")) {
-					options.cache_file = get_arg();
-				} else if (is_opt_of("P", "babel-plugins")) {
-					options.babel_plugins = get_arg().split(",");
-				} else {
-					invalid();
-				}
-			} else {
-				invalid();
-			}
-		}
-		run_update(options);
-	} else {
-		usage("invalid command '" + cmd + "'; try 'help'");
-	}
+function trinfo_import_from_path(path, opts) {
+	opts = resolve_options(opts);
+	let patch = JSON.parse(fs.readFileSync(path));
+	let translations = construct_translations_object(opts);
+	translations.import_json_trinfo_patch(patch);
+	translations.commit({...opts, is_patch:true});
 }
 
 module.exports = {
-	run,
+	run_update,
+	run_export_translations,
+	trinfo_import_from_path,
 }
-
