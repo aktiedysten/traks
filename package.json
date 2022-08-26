@@ -20,5 +20,6 @@
   },
   "devDependencies": {
     "readline-sync": "^1.4.10"
-  }
+  },
+  "files": ["index.js", "react-app.js", "setup-baked.js", "setup.js", "tool.js", "util.js"]
 }
