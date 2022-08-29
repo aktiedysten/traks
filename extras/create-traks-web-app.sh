@@ -306,7 +306,7 @@ if [ -z "\$1" ] ; then
 	echo "Usage: \$0 <lang>"
 	exit 1
 fi
-TRAKS_BAKE_LANG=\$lang TRAKS_FALLBACK_LANG=en TRAKS_TRANSLATIONS_FILE=src/traks-translations.js npm run build
+TRAKS_BAKE_LANG=\$1 TRAKS_FALLBACK_LANG=en TRAKS_TRANSLATIONS_FILE=src/traks-translations.js npm run build
 HERE
 chmod +x bake-build.sh
 
