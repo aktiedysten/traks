@@ -31,16 +31,15 @@ module.exports = function (opts) {
 	};
 	TraksProvider.prototype = Object.create(React.Component.prototype);
 	TraksProvider.prototype.constructor = TraksProvider;
+	TraksProvider.prototype.set_lang = opts.set_lang || function (lang) {
+		this.setState({ lang: lang });
+	};
 	TraksProvider.prototype.render = function () {
 		const value = {
 			translation_missing_component: opts.translation_missing_component,
 			translations: opts.translations,
 			lang: this.state.lang,
-			set_lang:
-				opts.set_lang ||
-				function (lang) {
-					this.setState({ lang: lang });
-				}.bind(this),
+			set_lang: function (lang) { this.set_lang(lang) }.bind(this),
 		};
 		return React.createElement(
 			TraksContext.Provider,
