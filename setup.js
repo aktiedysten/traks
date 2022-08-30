@@ -77,5 +77,6 @@ module.exports = function (opts) {
 		T: T,
 		TraksProvider: TraksProvider,
 		TraksConsumer: TraksConsumer,
+		TraksContext: TraksContext,
 	};
 };
