@@ -2,7 +2,6 @@
   "name": "traks",
   "version": "2.0.0",
   "description": "Translations for React; Automatic, Kind and Superior",
-  "main": "index.js",
   "scripts": {
     "test": "node test.js"
   },
@@ -21,5 +20,13 @@
   "devDependencies": {
     "readline-sync": "^1.4.10"
   },
-  "files": ["index.js", "react-app.js", "setup-baked.js", "setup.js", "tool.js", "util.js"]
+  "exports": {
+    "./react-app": "./react-app.js",
+    "./expo-preset": "./expo-preset.js",
+    "./setup-baked": "./setup-baked.js",
+    "./setup": "./setup.js",
+    "./tool": "./tool.js",
+    "./util": "./util.js"
+  },
+  "files": ["react-app.js", "expo-preset.js", "setup-baked.js", "setup.js", "tool.js", "util.js"]
 }
