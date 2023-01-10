@@ -79,6 +79,65 @@ function print_options(opts) {
 
 const construct_translations_object = (opts) => new util.Translations(babel, opts.babel_plugins, opts.translations_file);
 
+function visit_sources(opts, visitor) {
+	const sources = (() => {
+		let exclude_dirs = util.array2set(opts.exclude_dirs);
+		let exclude_files = util.array2set(opts.exclude_files);
+		let sources = [];
+		let rec; rec = function (path) {
+			const st = fs.statSync(path);
+			if (st.isFile()) {
+				if (exclude_files[fspath.basename(path)]) return;
+				const ext = fspath.extname(path).toLowerCase();
+				let is_jsx = false;
+				for (const src_ext of opts.jsx_exts) {
+					if (ext === ("." + src_ext)) {
+						is_jsx = true;
+						break;
+					}
+				}
+				if (is_jsx) sources.push(path);
+			} else if (st.isDirectory()) {
+				if (exclude_dirs[fspath.basename(path)]) return;
+				for (const sub of fs.readdirSync(path)) {
+					rec(fspath.join(path, sub));
+				}
+			}
+		};
+		for (const dir of opts.src_dirs) rec(dir);
+
+		return sources;
+	})();
+
+
+	for (const src of sources) {
+		visitor(src);
+	}
+
+}
+
+function get_translation_paths_from_src(opts, src) {
+	let translation_paths = [];
+	const tx = babel.transformFileSync(src, {
+		babelrc: false,
+		configFile: false,
+		plugins: [
+			...opts.babel_plugins,
+			[function (babel) {
+				return {
+					visitor: {
+						JSXElement(path) {
+							if (!util.is_translation_tag_node(path.node)) return;
+							translation_paths.push(path);
+						}
+					}
+				};
+			}, {legacy:true}]
+		],
+	});
+	return translation_paths;
+}
+
 function run_update(opts) {
 	opts = resolve_options(opts);
 
@@ -217,64 +276,41 @@ function run_update(opts) {
 		]
 	);
 
-	const sources = (() => {
-		let exclude_dirs = util.array2set(opts.exclude_dirs);
-		let exclude_files = util.array2set(opts.exclude_files);
-		let sources = [];
-		let rec; rec = function (path) {
-			const st = fs.statSync(path);
-			if (st.isFile()) {
-				if (exclude_files[fspath.basename(path)]) return;
-				const ext = fspath.extname(path).toLowerCase();
-				let is_jsx = false;
-				for (const src_ext of opts.jsx_exts) {
-					if (ext === ("." + src_ext)) {
-						is_jsx = true;
-						break;
-					}
-				}
-				if (is_jsx) sources.push(path);
-			} else if (st.isDirectory()) {
-				if (exclude_dirs[fspath.basename(path)]) return;
-				for (const sub of fs.readdirSync(path)) {
-					rec(fspath.join(path, sub));
-				}
-			}
-		};
-		for (const dir of opts.src_dirs) rec(dir);
-
-		return sources;
-	})();
-
 	let translations = construct_translations_object(opts);
 
-	for (const src of sources) {
+	visit_sources(opts, (src) => {
 		translations.visit_src(src);
-
-		let translation_paths = [];
-		const tx = babel.transformFileSync(src, {
-			babelrc: false,
-			configFile: false,
-			plugins: [
-				...opts.babel_plugins,
-				[function (babel) {
-					return {
-						visitor: {
-							JSXElement(path) {
-								if (!util.is_translation_tag_node(path.node)) return;
-								translation_paths.push(path);
-							}
-						}
-					};
-				}, {legacy:true}]
-			],
-		});
-
+		let translation_paths = get_translation_paths_from_src(opts, src);
 		const tags = translation_paths.map(path => util.process_path(path));
 		for (const tag of tags) translations.register_tag(src, tag);
-	}
+	});
 
 	if (translations) translations.commit(opts);
+}
+
+function dump_hashes(opts) {
+	opts = resolve_options(opts);
+	let locations = [];
+	visit_sources(opts, (src) => {
+		let translation_paths = get_translation_paths_from_src(opts, src);
+		const tags = translation_paths.map(path => util.process_path(path));
+		for (const tag of tags) {
+			locations.push([src, tag.loc.start.line, tag.key]);
+		}
+	});
+
+	const valcmp = (a,b) => a<b?-1:a>b?1:0;
+
+	locations.sort((a,b) => {
+		let d0 = valcmp(a[0], b[0]);
+		if (d0 !== 0) return d0;
+		let d1 = a[1] - b[1];
+		return d1;
+	});
+
+	for (const loc of locations) {
+		console.log(loc[0] + ":" + loc[1] + "\t" + loc[2]);
+	}
 }
 
 function run_export_translations(opts) {
@@ -297,6 +333,7 @@ function trinfo_import_from_path(path, opts) {
 
 module.exports = {
 	run_update,
+	dump_hashes,
 	run_export_translations,
 	trinfo_import_from_path,
 }
