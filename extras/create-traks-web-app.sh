@@ -25,9 +25,9 @@ npm install --save-dev react-app-rewired customize-cra cross-env
 
 # Fix package.json; changing "react-scripts" => "react-app-rewired" is a
 # requirement of `react-app-rewired`
-sed -i 's/react-scripts start/cross-env PORT=63000 react-app-rewired start/g' package.json
-sed -i 's/react-scripts build/react-app-rewired build/g' package.json
-sed -i 's/react-scripts test/react-app-rewired test/g' package.json
+perl -pi -e 's/react-scripts start/cross-env PORT=63000 react-app-rewired start/g' package.json
+perl -pi -e 's/react-scripts build/react-app-rewired build/g' package.json
+perl -pi -e 's/react-scripts test/react-app-rewired test/g' package.json
 
 
 # Install traks (hopefully; argument is not validated)
