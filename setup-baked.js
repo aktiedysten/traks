@@ -1,5 +1,5 @@
 const React = require('react');
-const ReactDOMServer = require('react-dom/server');
+const { renderToStaticMarkup } = require("./renderToStaticMarkup")
 
 module.exports = function(opts) {
 	const T = function (props) {
@@ -17,7 +17,7 @@ module.exports = function(opts) {
 
 	const TraksConsumer = function (props) {
 		const render_static = function (element) {
-			return ReactDOMServer.renderToStaticMarkup(element);
+			return renderToStaticMarkup(element);
 		};
 		return React.cloneElement(
 			props.children,
