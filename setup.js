@@ -1,4 +1,9 @@
 const React = require("react");
+const TextEncodingPolyfill = require('text-encoding');
+	Object.assign(global, {
+    	TextEncoder: TextEncodingPolyfill.TextEncoder,
+    	TextDecoder: TextEncodingPolyfill.TextDecoder,
+	});
 const ReactDOMServer = require("react-dom/server");
 
 module.exports = function (opts) {
