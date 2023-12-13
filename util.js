@@ -100,8 +100,30 @@ const capture_dependencies = (root_path, deps) => {
 	});
 };
 
-const process_path = (path) => {
+// these normalizers remove leading/trailing whitespace and collapse whitespace
+// sequences for the purpose of making a signature/key.
+const signature_normalizers = [
+	s=>s
+		.replace(/^[ \t]+/gm, "") // remove leading whitespace
+		.replace(/[ \t]+$/gm, "") // remove trailing whitespace
+		.replace(/[ \t]+/g, " ")  // collapse whitespace
+	,
+	s=>s
+		.replaceAll("\r", "")     // remove carriage returns
+		.replace(/^[ \t]+/gm, "") // remove leading whitespace
+		.replace(/[ \t]+$/gm, "") // remove trailing whitespace
+		.replaceAll("\n", " ")    // convert new lines to whitespace
+		.replace(/[ \t]+/g, " ")  // collapse whitespace
+	,
+];
+
+const process_path = (path, signature_normalizer_version) => {
 	const node = path.node;
+
+	const signature_normalizer = signature_normalizers[signature_normalizer_version];
+	if (!signature_normalizer) {
+		throw new Error("invalid signature_normalizer_version");
+	}
 
 	if (!is_translation_tag_node(path.node)) {
 		throw new TraksError(
@@ -209,19 +231,8 @@ const process_path = (path) => {
 	deps = Object.keys(dep_set);
 	deps = deps.sort();
 
-	/* remove leading/trailing whitespace and collapse whitespace sequences
-	 * for the purpose of making a signature/key. there may be some really
-	 * weird cases where this is the WrongThing(tm), but I can't think of
-	 * any. indentation changes are way more common and shouldn't change
-	 * the signature. */
-	const signature_body = body
-		.replace(/^[ \t]+/gm, "")
-		.replace(/[ \t]+$/gm, "")
-		.replace(/[ \t]+/g, " ");
-
-	/* calculate signature, and a body from it */
-	const signature =
-		signature_body + "\x00" + context + "\x00" + deps.join(",");
+	// calculate signature + hash
+	const signature = signature_normalizer(body) + "\x00" + context + "\x00" + deps.join(",");
 	const key = crypto
 		.createHash("sha256")
 		.update(signature)
@@ -299,11 +310,11 @@ function patch_key_attr(attributes, path) {
 	return attributes;
 }
 
-const replace = (babel, path, keep_children) => {
+const replace = (babel, path, keep_children, signature_normalizer_version) => {
 	if (path.node.was_traksed) return; // prevent infinite recursion...
 	const t = babel.types;
 
-	const { key, deps } = process_path(path);
+	const { key, deps } = process_path(path, signature_normalizer_version);
 
 	const is_self_closing = !keep_children;
 	const children = keep_children ? path.node.children : [];
@@ -321,10 +332,10 @@ const replace = (babel, path, keep_children) => {
 	path.replaceWith(element);
 };
 
-const bake = (babel, path, translations, try_langs) => {
+const bake = (babel, path, translations, try_langs, signature_normalizer_version) => {
 	if (path.node.was_traksed) return; // prevent infinite recursion...
 	const t = babel.types;
-	const { key, deps } = process_path(path);
+	const { key, deps } = process_path(path, signature_normalizer_version);
 
 	let lang, node;
 	for (lang of try_langs) {

@@ -52,7 +52,9 @@ const default_options = {
 		'babel-plugin-dynamic-import-node',
 	],
 
-	tab: "\t"
+	tab: "\t",
+
+	signature_normalizer_version: 0,
 }
 
 const resolve_options = (opts) => {
@@ -281,7 +283,7 @@ function run_update(opts) {
 	visit_sources(opts, (src) => {
 		translations.visit_src(src);
 		let translation_paths = get_translation_paths_from_src(opts, src);
-		const tags = translation_paths.map(path => util.process_path(path));
+		const tags = translation_paths.map(path => util.process_path(path, opts.signature_normalizer_version));
 		for (const tag of tags) translations.register_tag(src, tag);
 	});
 
@@ -293,7 +295,7 @@ function dump_hashes(opts) {
 	let locations = [];
 	visit_sources(opts, (src) => {
 		let translation_paths = get_translation_paths_from_src(opts, src);
-		const tags = translation_paths.map(path => util.process_path(path));
+		const tags = translation_paths.map(path => util.process_path(path, opts.signature_normalizer_version));
 		for (const tag of tags) {
 			locations.push([src, tag.loc.start.line, tag.key]);
 		}
@@ -331,9 +333,14 @@ function trinfo_import_from_path(path, opts) {
 	translations.commit({...opts, is_patch:true});
 }
 
+function change_signature_normalizer_version(old_version, new_version) {
+	throw new Error("XXX");
+}
+
 module.exports = {
 	run_update,
 	dump_hashes,
 	run_export_translations,
 	trinfo_import_from_path,
+	change_signature_normalizer_version,
 }
