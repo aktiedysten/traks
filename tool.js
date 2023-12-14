@@ -1,7 +1,7 @@
 const babel = require('@babel/core');
 const fs = require('fs');
 const fspath = require('path');
-const util = require('./util');
+const lib = require('./lib');
 
 function is_react_component_name(name) {
 	return name[0] === name[0].toUpperCase();
@@ -79,12 +79,12 @@ function print_options(opts) {
 	popt('babel_plugins');
 }
 
-const construct_translations_object = (opts) => new util.Translations(babel, opts.babel_plugins, opts.translations_file);
+const construct_translations_object = (opts) => new lib.Translations(babel, opts.babel_plugins, opts.translations_file);
 
 function visit_sources(opts, visitor) {
 	const sources = (() => {
-		let exclude_dirs = util.array2set(opts.exclude_dirs);
-		let exclude_files = util.array2set(opts.exclude_files);
+		let exclude_dirs = lib.array2set(opts.exclude_dirs);
+		let exclude_files = lib.array2set(opts.exclude_files);
 		let sources = [];
 		let rec; rec = function (path) {
 			const st = fs.statSync(path);
@@ -129,7 +129,7 @@ function get_translation_paths_from_src(opts, src) {
 				return {
 					visitor: {
 						JSXElement(path) {
-							if (!util.is_translation_tag_node(path.node)) return;
+							if (!lib.is_translation_tag_node(path.node)) return;
 							translation_paths.push(path);
 						}
 					}
@@ -283,7 +283,7 @@ function run_update(opts) {
 	visit_sources(opts, (src) => {
 		translations.visit_src(src);
 		let translation_paths = get_translation_paths_from_src(opts, src);
-		const tags = translation_paths.map(path => util.process_path(path, opts.signature_normalizer_version));
+		const tags = translation_paths.map(path => lib.process_path(path, opts.signature_normalizer_version));
 		for (const tag of tags) translations.register_tag(src, tag);
 	});
 
@@ -295,7 +295,7 @@ function dump_hashes(opts) {
 	let locations = [];
 	visit_sources(opts, (src) => {
 		let translation_paths = get_translation_paths_from_src(opts, src);
-		const tags = translation_paths.map(path => util.process_path(path, opts.signature_normalizer_version));
+		const tags = translation_paths.map(path => lib.process_path(path, opts.signature_normalizer_version));
 		for (const tag of tags) {
 			locations.push([src, tag.loc.start.line, tag.key]);
 		}

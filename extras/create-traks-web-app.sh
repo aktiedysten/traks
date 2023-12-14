@@ -56,7 +56,7 @@ const babelBrainSurgery = () => (config) => {
 	// instead of overwriting the preset/plugins arrays like I do here. All
 	// these approaches end up doing "weird internal AST rewrites" before
 	// my traks plugin runs (it triggers the ThisExpression guard in
-	// util.js; removing THAT simply moves the problem elsewhere and makes
+	// lib.js; removing THAT simply moves the problem elsewhere and makes
 	// it even harder to debug)
 
 	// However, overwriting these arrays, setting them to what I think they

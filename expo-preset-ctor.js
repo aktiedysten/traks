@@ -1,4 +1,4 @@
-const util = require("./util");
+const lib = require("./lib");
 
 // eslint-disable-next-line no-unused-vars
 
@@ -9,8 +9,8 @@ module.exports = (signature_normalizer_version) => {
 			return {
 				visitor: {
 					JSXElement(path) {
-						if (!util.is_translation_tag_node(path.node)) return;
-						util.replace(babel, path, keep_children, signature_normalizer_version);
+						if (!lib.is_translation_tag_node(path.node)) return;
+						lib.replace(babel, path, keep_children, signature_normalizer_version);
 					},
 				},
 			};

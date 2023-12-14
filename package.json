@@ -21,12 +21,16 @@
     "readline-sync": "^1.4.10"
   },
   "exports": {
-    "./react-app": "./react-app.js",
-    "./expo-preset": "./expo-preset.js",
+    "./react-app-ctor": "./react-app-ctor.js",
+    "./react-app0": "./react-app0.js",
+    "./react-app1": "./react-app1.js",
+    "./expo-preset-ctor": "./expo-preset-ctor.js",
+    "./expo-preset0": "./expo-preset0.js",
+    "./expo-preset1": "./expo-preset1.js",
     "./setup-baked": "./setup-baked.js",
     "./setup": "./setup.js",
     "./tool": "./tool.js",
-    "./util": "./util.js"
+    "./lib": "./lib.js"
   },
-  "files": ["react-app.js", "expo-preset.js", "setup-baked.js", "setup.js", "tool.js", "util.js", "renderToStaticMarkup.js"]
+  "files": ["react-app-ctor.js", "react-app0.js", "react-app1.js", "expo-preset-ctor.js", "expo-preset0.js", "expo-preset1.js", "setup-baked.js", "setup.js", "tool.js", "lib.js", "renderToStaticMarkup.js"]
 }

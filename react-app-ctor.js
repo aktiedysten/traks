@@ -1,4 +1,4 @@
-const util = require("./util");
+const lib = require("./lib");
 const fs = require('fs');
 const build_env = process.env.BABEL_ENV || process.env.NODE_ENV;
 const keep_children = build_env === 'development';
@@ -15,7 +15,7 @@ module.exports = (signature_normalizer_version) => {
 			process.exit(1);
 		}
 		// XXX babel-plugins should be the same as during 'traks update'...
-		translations = new util.Translations(
+		translations = new lib.Translations(
 			require('@babel/core'),
 			['@babel/plugin-syntax-jsx/lib/index.js','@babel/plugin-proposal-object-rest-spread/lib/index.js'],
 			translations_file);
@@ -29,20 +29,20 @@ module.exports = (signature_normalizer_version) => {
 			visitor: {
 				ExportDefaultDeclaration(path) {
 					if (bake_lang && fs.realpathSync(path.hub.file.opts.filename) === fs.realpathSync(translations_file)) {
-						util.bake_translations_export(babel, path, try_langs);
+						lib.bake_translations_export(babel, path, try_langs);
 					}
 				},
 
 				JSXElement(path) {
-					if (!util.is_translation_tag_node(path.node)) return;
+					if (!lib.is_translation_tag_node(path.node)) return;
 					try {
 						if (bake_lang) {
-							util.bake(babel, path, translations, try_langs, signature_normalizer_version);
+							lib.bake(babel, path, translations, try_langs, signature_normalizer_version);
 						} else {
-							util.replace(babel, path, keep_children, signature_normalizer_version);
+							lib.replace(babel, path, keep_children, signature_normalizer_version);
 						}
 					} catch(e) {
-						if (e instanceof util.TraksError) {
+						if (e instanceof lib.TraksError) {
 							throw path.buildCodeFrameError(e.msg);
 						} else {
 							throw path.buildCodeFrameError(e);

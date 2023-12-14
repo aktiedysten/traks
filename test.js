@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 const babel = require('@babel/core');
-const util = require('./util');
+const lib = require('./lib');
 const fs = require('fs');
 
 function require_force(module) {
@@ -11,13 +11,13 @@ function require_force(module) {
 }
 
 function require_preset(env, bake_lang, translations_file) {
-	delete require.cache[require.resolve('./react-app')];
+	delete require.cache[require.resolve('./react-app1')];
 	delete require.cache[require.resolve('@babel/preset-react')];
 	process.env.NODE_ENV = env || '';
 	process.env.TRAKS_BAKE_LANG = bake_lang || '';
 	process.env.TRAKS_TRANSLATIONS_FILE = translations_file || '';
 	return {
-		plugins: [require('./react-app')],
+		plugins: [require('./react-app1')],
 	}
 }
 
@@ -167,7 +167,7 @@ const tests = [
 					return {
 						visitor: {
 							ExportDefaultDeclaration(path) {
-								util.bake_translations_export(babel, path, ["da"]);
+								lib.bake_translations_export(babel, path, ["da"]);
 								export_path = path;
 							}
 						}
