@@ -974,6 +974,20 @@ class Translations {
 		}
 	}
 
+	prune_deleted_translations() {
+		let new_translation_list = [];
+		for (const t of this.translation_list) {
+			if (t.is_deleted) {
+				for (const prop of ["known_keys", "node_map", "can_inline_map", "refs"]) {
+					delete this[prop][t.key];
+				}
+				continue;
+			}
+			new_translation_list.push(t);
+		}
+		this.translation_list = new_translation_list;
+	}
+
 	commit(opts) {
 		let n_new_translations = 0;
 		let n_deleted_translations = 0;

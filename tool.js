@@ -373,10 +373,18 @@ function change_signature_normalizer_version(opts, old_version, new_version) {
 	translations.commit({...opts, is_patch:true});
 }
 
+function prune_deleted_translations(opts) {
+	opts = resolve_options(opts);
+	let translations = construct_translations_object(opts);
+	translations.prune_deleted_translations();
+	translations.commit({...opts, is_patch:true});
+}
+
 module.exports = {
 	run_update,
 	dump_hashes,
 	run_export_translations,
 	trinfo_import_from_path,
 	change_signature_normalizer_version,
+	prune_deleted_translations,
 }
