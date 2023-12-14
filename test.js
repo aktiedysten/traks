@@ -4,30 +4,24 @@ const babel = require('@babel/core');
 const lib = require('./lib');
 const fs = require('fs');
 
-function require_force(module) {
-	const path = require.resolve(module);
-	delete require.cache[path];
-	return require(module);
-}
-
-function require_preset(env, bake_lang, translations_file) {
-	delete require.cache[require.resolve('./react-app1')];
+function resolve_babel_ops(env, bake_lang, translations_file, signature_normalizer_version) {
+	const imp = ["./react-app0", "./react-app1"][signature_normalizer_version];
+	if (!imp) throw new Error("invalid signature_normalizer_version");
+	delete require.cache[require.resolve(imp)];
+	delete require.cache[require.resolve("./react-app-ctor")];
 	delete require.cache[require.resolve('@babel/preset-react')];
 	process.env.NODE_ENV = env || '';
 	process.env.TRAKS_BAKE_LANG = bake_lang || '';
 	process.env.TRAKS_TRANSLATIONS_FILE = translations_file || '';
-	return {
-		plugins: [require('./react-app1')],
-	}
-}
-
-function babel_opts(env, bake_lang, translations_file) {
-	const preset = require_preset(env, bake_lang, translations_file);
+	const preset = { plugins: [require(imp)] }
 	return {
 		filename: "inline",
 		presets: [require("@babel/preset-react"), preset]
 	};
 }
+
+const resolve_babel_ops0 = (env, bake_lang, translations_file) => resolve_babel_ops(env, bake_lang, translations_file, 0);
+const resolve_babel_ops1 = (env, bake_lang, translations_file) => resolve_babel_ops(env, bake_lang, translations_file, 1);
 
 let T = {};
 
@@ -43,12 +37,7 @@ function mock_React() {
 }
 
 function assert(cond, msg) {
-	if (msg) {
-		msg = ": " + msg;
-	} else {
-		msg = "";
-	}
-	if (!cond) throw new Error("assert() failed" + msg);
+	if (!cond) throw new Error("assert() failed" + (msg ? (": "+msg) : ""));
 }
 
 function compare(a, b) {
@@ -94,7 +83,7 @@ let magic_is_baked, magic_lang;
 
 const tests = [
 	['simple translation (development)', () => {
-		transform_test('<T>foo</T>', babel_opts('development'), (t) => {
+		transform_test('<T>foo</T>', resolve_babel_ops1('development'), (t) => {
 			assert(React.type === T);
 			t.assert_children_is('foo');
 			t.assert_prop_is('deps', []);
@@ -103,7 +92,7 @@ const tests = [
 	}],
 
 	['simple translation (production)', () => {
-		transform_test('<T>foo</T>', babel_opts('production'), (t) => {
+		transform_test('<T>foo</T>', resolve_babel_ops1('production'), (t) => {
 			assert(React.type === T);
 			t.assert_children_is(undefined);
 			t.assert_prop_is('deps', []);
@@ -111,12 +100,22 @@ const tests = [
 		});
 	}],
 
+	['line breaks in <T>-tags', () => {
+		const k = '88b29c555c9c';
+		const opt0 = resolve_babel_ops0('development');
+		const opt1 = resolve_babel_ops1('development');
+		transform_test('<T>foo bar</T>',  opt0, (t) => { t.assert_prop_is('k', k); });
+		transform_test('<T>foo bar</T>',  opt1, (t) => { t.assert_prop_is('k', k); });
+		transform_test('<T>foo\nbar</T>', opt1, (t) => { t.assert_prop_is('k', k); });
+		transform_test('<T>foo\nbar</T>', opt0, (t) => { t.assert_prop_is('k', "a831df127868"); }); // <<< old v0 normalizer included newlines in signature, changing the hash
+	}],
+
 	['magic constants', () => {
-		transform_test('magic_is_baked = "TRAKS_COMPILE_TIME_MAGICK_CONST__IS_BAKED"', babel_opts('development'), (t) => {
+		transform_test('magic_is_baked = "TRAKS_COMPILE_TIME_MAGICK_CONST__IS_BAKED"', resolve_babel_ops1('development'), (t) => {
 			assert(magic_is_baked === false);
 		});
 
-		const bake_opts = babel_opts('development', 'zz', fs.realpathSync('test-fixtures/dummy-traks-translations.js'));
+		const bake_opts = resolve_babel_ops1('development', 'zz', fs.realpathSync('test-fixtures/dummy-traks-translations.js'));
 
 		transform_test('magic_is_baked = "TRAKS_COMPILE_TIME_MAGICK_CONST__IS_BAKED"', bake_opts, (t) => {
 			assert(magic_is_baked === true);
@@ -128,7 +127,7 @@ const tests = [
 	}],
 
 	['baking', () => {
-		const bake_opts = babel_opts('development', 'da', fs.realpathSync('test-fixtures/dummy-traks-translations.js'));
+		const bake_opts = resolve_babel_ops1('development', 'da', fs.realpathSync('test-fixtures/dummy-traks-translations.js'));
 
 		// simple translations get inlined (see fixture above)
 		transform_test('<T>foo</T>', bake_opts, (t) => {
@@ -194,7 +193,7 @@ const tests = [
 	}],
 
 	['key attribute is passed as-is', () => {
-		transform_test('<T key={5}>foo</T>', babel_opts('development'), (t) => {
+		transform_test('<T key={5}>foo</T>', resolve_babel_ops1('development'), (t) => {
 			assert(React.type === T);
 			t.assert_children_is('foo');
 			t.assert_prop_is('deps', []);
@@ -202,7 +201,7 @@ const tests = [
 			t.assert_prop_is('key', 5);
 		});
 
-		const bake_opts = babel_opts('development', 'da', fs.realpathSync('test-fixtures/dummy-traks-translations.js'));
+		const bake_opts = resolve_babel_ops1('development', 'da', fs.realpathSync('test-fixtures/dummy-traks-translations.js'));
 		transform_test('<T key={42}>foo</T>', bake_opts, (t) => {
 			t.assert_children_is("foo-da");
 			t.assert_prop_is('k', undefined);
@@ -212,45 +211,45 @@ const tests = [
 	}],
 
 	['deps', () => {
-		transform_test('<T>{42}</T>', babel_opts('development'), (t) => {
+		transform_test('<T>{42}</T>', resolve_babel_ops1('development'), (t) => {
 			t.assert_prop_is('deps', []);
 		});
 
-		transform_test('FOO=420;<T>{FOO}</T>', babel_opts('development'), (t) => {
+		transform_test('FOO=420;<T>{FOO}</T>', resolve_babel_ops1('development'), (t) => {
 			t.assert_prop_is('deps', [420]);
 		});
 
-		transform_test('A=1;B=2;C=3;<T>{A}{B}{C}</T>', babel_opts('development'), (t) => {
+		transform_test('A=1;B=2;C=3;<T>{A}{B}{C}</T>', resolve_babel_ops1('development'), (t) => {
 			t.assert_prop_is('deps', [1,2,3]);
 		});
 
-		transform_test('A="a";B="b";C="c";<T>{C}{B}{A}{B}{C}</T>', babel_opts('development'), (t) => {
+		transform_test('A="a";B="b";C="c";<T>{C}{B}{A}{B}{C}</T>', resolve_babel_ops1('development'), (t) => {
 			t.assert_prop_is('deps', ["a", "b", "c"]);
 		});
 
-		transform_test('A={B:{C:420}};<T>{A.B.C}</T>', babel_opts('development'), (t) => {
+		transform_test('A={B:{C:420}};<T>{A.B.C}</T>', resolve_babel_ops1('development'), (t) => {
 			t.assert_prop_is('deps', [{B:{C:420}}]);
 		});
 
-		transform_test('<T><span>hey</span></T>', babel_opts('development'), (t) => {
+		transform_test('<T><span>hey</span></T>', resolve_babel_ops1('development'), (t) => {
 			t.assert_prop_is('deps', []);
 		});
 
-		transform_test('A=()=>"foo";<T><A/></T>', babel_opts('development'), (t) => {
+		transform_test('A=()=>"foo";<T><A/></T>', resolve_babel_ops1('development'), (t) => {
 			t.assert_prop_is('deps', [A]);
 		});
 
-		transform_test('A=42;B=420;<T deps={[B]}>{A}</T>', babel_opts('development'), (t) => {
+		transform_test('A=42;B=420;<T deps={[B]}>{A}</T>', resolve_babel_ops1('development'), (t) => {
 			t.assert_prop_is('deps', [42,420]);
 		});
 
-		transform_test('BAR=666;<T><div xyzzy={{foooz:BAR}}></div></T>', babel_opts('development'), (t) => {
+		transform_test('BAR=666;<T><div xyzzy={{foooz:BAR}}></div></T>', resolve_babel_ops1('development'), (t) => {
 			t.assert_prop_is('deps', [666]);
 		});
 
 		let ex;
 		try {
-			transform_test('<T>{this.state}</T>', babel_opts('development'));
+			transform_test('<T>{this.state}</T>', resolve_babel_ops1('development'));
 		} catch (e) {
 			ex = e;
 		}
