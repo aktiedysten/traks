@@ -948,6 +948,32 @@ class Translations {
 		this.seen_src_tags_map[src].push(tag);
 	}
 
+	map_keys(keymap) {
+		let remap = {};
+		for (const t of this.translation_list) {
+			if (t.is_deleted) continue;
+			const old_key = t.key;
+			const new_key = keymap[t.key];
+			if (!new_key) throw new Error("key " + t.key + " could not be mapped: refusing to continue; did you forget to update translations before this operation?");
+			if (new_key === old_key) continue;
+			if (remap[old_key] === undefined) {
+				remap[old_key] = new_key;
+				console.log("Will map key " + old_key + " to " + new_key);
+			}
+			t.key = new_key;
+		}
+		for (const old_key in remap) {
+			const new_key = remap[old_key];
+			for (const prop of ["known_keys", "node_map", "can_inline_map", "refs"]) {
+				if (this[prop][new_key] !== undefined) {
+					throw Error("cannot map old key (" + old_key + ") to new key (" + new_key + ") for prop \"" + prop + "\" because we already have a value for new key");
+				}
+				this[prop][new_key] = this[prop][old_key]
+				delete this[prop][old_key];
+			}
+		}
+	}
+
 	commit(opts) {
 		let n_new_translations = 0;
 		let n_deleted_translations = 0;

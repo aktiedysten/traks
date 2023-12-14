@@ -54,7 +54,7 @@ const default_options = {
 
 	tab: "\t",
 
-	signature_normalizer_version: 0,
+	signature_normalizer_version: 1,
 }
 
 const resolve_options = (opts) => {
@@ -140,13 +140,8 @@ function get_translation_paths_from_src(opts, src) {
 	return translation_paths;
 }
 
-function run_update(opts) {
-	opts = resolve_options(opts);
-
-	print_options(opts);
-
+function init_stubs(opts) {
 	const rl = readline();
-
 	const required_file = (path, explain, stub) => {
 		if (!fs.existsSync(path)) {
 			if (!rl.Yn(path + " does not exist; create it?")) {
@@ -278,6 +273,13 @@ function run_update(opts) {
 		]
 	);
 
+}
+
+function run_update(opts) {
+	opts = resolve_options(opts);
+	print_options(opts);
+	init_stubs(opts);
+
 	let translations = construct_translations_object(opts);
 
 	visit_sources(opts, (src) => {
@@ -316,10 +318,10 @@ function dump_hashes(opts) {
 }
 
 function run_export_translations(opts) {
+	opts = resolve_options(opts);
 	print_options(opts);
 	const path = "traks-export.json";
 	console.log("Exporting " + path + " ...");
-	opts = resolve_options(opts);
 	let translations = construct_translations_object(opts);
 	let ex = translations.export_json();
 	fs.writeFileSync(path, JSON.stringify(ex, null, 2));
@@ -333,8 +335,42 @@ function trinfo_import_from_path(path, opts) {
 	translations.commit({...opts, is_patch:true});
 }
 
-function change_signature_normalizer_version(old_version, new_version) {
-	throw new Error("XXX");
+function change_signature_normalizer_version(opts, old_version, new_version) {
+	opts = resolve_options(opts);
+
+	const opts_for_normalizer_version = (version) => ({...opts, signature_normalizer_version: version});
+
+	let lists = [];
+	for (const version of [old_version, new_version]) {
+		let local_opts = opts_for_normalizer_version(version);
+		let list = [];
+		visit_sources(local_opts, (src) => {
+			let translation_paths = get_translation_paths_from_src(local_opts, src);
+			const tags = translation_paths.map(path => lib.process_path(path, local_opts.signature_normalizer_version));
+			for (const tag of tags) {
+				list.push([src, tag.loc.start.line, tag.key]);
+			}
+		});
+		lists.push(list);
+	}
+
+	const n = lists[0].length;
+	if (n !== lists[1].length) throw new Error("sanity check failed: list-length mismatch");
+	let keymap = {};
+	for (let i = 0; i < n; i++) {
+		const e0 = lists[0][i];
+		const e1 = lists[1][i];
+		if (e0[0] !== e1[0]) throw new Error("sanity check failed: element 0 mismatch");
+		if (e0[1] !== e1[1]) throw new Error("sanity check failed: element 1 mismatch");
+		const k0 = e0[2];
+		const k1 = e1[2];
+		keymap[k0] = k1;
+		if (k0 !== k1) console.log("MAP", k0, "=>", k1);
+	}
+
+	let translations = construct_translations_object(opts_for_normalizer_version(old_version));
+	translations.map_keys(keymap);
+	translations.commit({...opts, is_patch:true});
 }
 
 module.exports = {
