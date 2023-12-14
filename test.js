@@ -7,9 +7,12 @@ const fs = require('fs');
 function resolve_babel_ops(env, bake_lang, translations_file, signature_normalizer_version) {
 	const imp = ["./react-app0", "./react-app1"][signature_normalizer_version];
 	if (!imp) throw new Error("invalid signature_normalizer_version");
+
+	// clear cache to force "re-require" of these files
 	delete require.cache[require.resolve(imp)];
 	delete require.cache[require.resolve("./react-app-ctor")];
 	delete require.cache[require.resolve('@babel/preset-react')];
+
 	process.env.NODE_ENV = env || '';
 	process.env.TRAKS_BAKE_LANG = bake_lang || '';
 	process.env.TRAKS_TRANSLATIONS_FILE = translations_file || '';
@@ -100,14 +103,34 @@ const tests = [
 		});
 	}],
 
-	['line breaks in <T>-tags', () => {
-		const k = '88b29c555c9c';
+	['stability against whitespace changes in <T>-tags', () => {
+		const common_key = '88b29c555c9c';
 		const opt0 = resolve_babel_ops0('development');
 		const opt1 = resolve_babel_ops1('development');
-		transform_test('<T>foo bar</T>',  opt0, (t) => { t.assert_prop_is('k', k); });
-		transform_test('<T>foo bar</T>',  opt1, (t) => { t.assert_prop_is('k', k); });
-		transform_test('<T>foo\nbar</T>', opt1, (t) => { t.assert_prop_is('k', k); });
-		transform_test('<T>foo\nbar</T>', opt0, (t) => { t.assert_prop_is('k', "a831df127868"); }); // <<< old v0 normalizer included newlines in signature, changing the hash
+
+		const test = (code, opt, key) => {
+			if (key === undefined) key = common_key;
+			transform_test(code, opt, (t) => { t.assert_prop_is('k', key); });
+		};
+
+		// old and new normalizer should yield same key for simple tags
+		// without newlines
+		test('<T>foo bar</T>',    opt1);
+		test('<T>foo bar</T>',    opt0);
+		test('<T>foo   bar</T>',  opt1);
+		test('<T>foo   bar</T>',  opt0);
+
+		// old and new normalizer should yield /different/ keys when
+		// containing newlines
+		test('<T>foo\nbar</T>', opt1);
+		test('<T>foo\nbar</T>', opt0, "a831df127868"); // <<< old v0 normalizer included newlines in signature, changing the hash
+
+		// test that a bunch of "whitespace garbage" still doesn't
+		// change the key with the new normalizer
+		test('<T>foo\n\n\nbar</T>',               opt1);
+		test('<T>foo\n \n \nbar</T>',             opt1);
+		test('<T>  foo\n \n \nbar  </T>',         opt1);
+		test('<T>  foo\n \r\n \t\n\rbar  </T>',   opt1);
 	}],
 
 	['magic constants', () => {
