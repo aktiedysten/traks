@@ -71,3 +71,40 @@ The two most popular translation solutions for React are `react-intl` and `react
 Both have a verbose and unnatural syntax, and want you to assign keys to every translation.
 I have previously worked with `gettext` which is intuitive to work with, has a light syntax and it automatically
 extracts translation strings from your source code. So, I desired something similar for React.
+
+### Traks 3 migration notes
+
+Traks 3 introduces breaking changes in how "function signatures" are made, and
+therefore what the translation hashes/keys will be. The change is roughly that
+newlines are now considered whitespace, so before, "foo bar" on two lines would
+hash to a different key than if on one line, but in Traks 3 they hash to the
+same key. This means that old keys are incompatible with new keys.
+
+Upgrading from 2 to 3 is possible, but requires a bit of a "dance"; doing
+things in the proper order:
+
+ - I recommend doing this in a branch, or otherwise using git in a manner that
+   you can easily undo your changes.
+ - You should run `update-translations.js` before upgrading.
+ - Then upgrade traks from 2 to 3 using npm/yarn (NOTE: if you need to revert
+   steps, be sure to also re-install `node_modules`. Yes, I've shot myself in
+   the foot by having traks 2 in package.json, but traks 3 in `node_modules`)
+ - To update translation keys, run a little script:
+```js
+#!/usr/bin/env node
+require("traks/tool").change_signature_normalizer_version(require("./traks-config"), /*old version=*/0, /*new version=*/1);
+```
+ - Babel preset, sometimes found in `config-overrides.js`, must be changed from
+   `traks/react-app` to `traks/react-app1`.
+
+This ought to be it, but sometimes conflicts occur. The `change_signature_normalizer_version` script
+above refuses to update `traks-translations.js` at all if any conflict occurs, so in that sense it's safe.
+There isn't always an easy way to fix these, but conflicts mention the conflicting keys, so you can try:
+ - searching for these keys
+ - deleting similar looking translations
+ - deleting all `_deleted` translations with:
+```js
+#!/usr/bin/env node
+require("traks/tool").prune_deleted_translations(require("./traks-config"));
+```
+When the script succeeds, your git diff should show a lot of changed translation keys.
